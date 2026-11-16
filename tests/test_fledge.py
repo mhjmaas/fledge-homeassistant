@@ -229,6 +229,19 @@ def test_commands_reach_only_what_was_chosen_only_as_allowed():
     assert [command(p) for p in refused] == [None] * len(refused)
 
 
+def test_a_fahrenheit_climate_takes_its_targets_in_fahrenheit():
+    # Home Assistant in °F gives a climate's range and target in °F, and
+    # the ring sends °F back (issue 13: 68 was refused as over 35).
+    states = {"climate.nest": State("climate.nest", "heat", temperature=70, min_temp=50, max_temp=90)}
+    command = lambda value: cards.command({"id": "climate.nest", "action": "temperature", "value": value},
+                                          ["climate.nest"], states.get)
+    assert command(68) == cards.Call("climate", "set_temperature", "climate.nest", {"temperature": 68})
+    assert command(90).data == {"temperature": 90}
+    assert command(95) is None and command(45) is None, "only within its own range"
+    states["climate.nest"] = State("climate.nest", "heat", temperature=21, min_temp=7, max_temp=35)
+    assert command(21).data == {"temperature": 21} and command(68) is None, "°C stays °C"
+
+
 def test_album_art_is_cropped_square_and_small():
     from io import BytesIO
     from PIL import Image

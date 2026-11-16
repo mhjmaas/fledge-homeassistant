@@ -266,6 +266,15 @@ def climate(state: State, limits: Mapping[str, Any] | None = None) -> dict[str, 
     }
 
 
+def _settable(state: State | None) -> tuple[float, float]:
+    """The targets a climate takes from the ring, in its own unit (°F where
+    Home Assistant is in °F): its min_temp to max_temp, or 5–35 (°C) if it
+    doesn't say."""
+    attributes = state.attributes if state is not None else {}
+    low, high = _number(attributes.get("min_temp")), _number(attributes.get("max_temp"))
+    return (low, high) if low is not None and high is not None and low < high else (5.0, 35.0)
+
+
 def _temperature(state: State | None, value: float, limits: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """set_temperature's data for `value` from the ring, within its limits:
     its target, or in a heat_cool range the end its card shows, the other
@@ -526,8 +535,12 @@ def command(payload: Mapping[str, Any], entities: Sequence[str],
         return Call(domain, RUN[domain], entity, {})
     if domain == "camera" and what == "snapshot":
         return Call("fledge", "snapshot", entity, {})
-    if domain == "climate" and what == "temperature" and 5 <= value <= 35:
-        return Call("climate", "set_temperature", entity, _temperature(get(entity), value, own))
+    if domain == "climate" and what == "temperature":
+        state = get(entity)
+        low, high = _settable(state)
+        if low <= value <= high:
+            return Call("climate", "set_temperature", entity, _temperature(state, value, own))
+        return None
     if domain == "media_player":
         if what == "volume" and 0 <= value <= 100:
             return Call("media_player", "volume_set", entity, {"volume_level": round(_within(value, 0, 100, own, "volume")) / 100})
