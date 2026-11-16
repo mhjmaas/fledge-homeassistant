@@ -218,9 +218,12 @@ const domainOf = (id) => id.split(".")[0];
 const N = {
   WHITE: [255, 255, 255], GREY: [168, 173, 181], DIM: [92, 96, 104], BLACK: [0, 0, 0], HEAT: [241, 90, 0],
   COOL: [26, 111, 216], MEDIA: [63, 209, 195], AMBER: [246, 136, 0], NOW: [255, 246, 214], ACTION: [255, 196, 87],
-  COVER: [120, 170, 255], ECO: [76, 175, 80], WARM: [255, 169, 87], TRACK: [27, 35, 48], FACE: [9, 13, 21],
-  LIFT: [22, 31, 48], SOFT: [255, 225, 205], UNDER: [163, 173, 184],
+  COVER: [120, 170, 255], ECO: [76, 175, 80], WARM: [255, 169, 87], TRACK: [34, 34, 37], FACE: [0, 0, 0],
+  COOL_GLOW: [20, 160, 255], SOFT: [255, 225, 205], UNDER: [163, 173, 184],
 };
+// paint::fade_edge: the face's glow darkens to black from radius 150 to 226
+// (of the display's 240), smoothly, so the glass meets the device's bezel.
+const FADE = [150, 226];
 const TICKS = 147;
 const SPAN = 292;
 const NUMBER = 299;
@@ -259,16 +262,32 @@ class Face {
     return `nf${faceIds}`;
   }
 
-  // paint::face: black (or the Nest's heating orange), or Fledge's dark
-  // face lifting to blue, glowing with what's on.
+  // paint::face: black (or the Nest's heating orange), or Fledge's black
+  // face glowing from the middle with what's on (heating's amber, cooling's
+  // lighter blue), black again by the glass's edge.
   face(bg) {
     if (!this.fledge) {
       this.svg.push(`<rect width="480" height="480" fill="${css(bg)}"/>`);
       return;
     }
     this.svg.push(`<rect width="480" height="480" fill="${css(N.FACE)}"/>`);
-    this.glow(N.LIFT, 240, 210, 330, 0.7);
-    if (!sameRgb(bg, N.BLACK)) this.glow(bg, 240, 272, 300, sameRgb(bg, N.HEAT) ? 0.62 : 0.42);
+    if (sameRgb(bg, N.BLACK)) return;
+    const [c, strength] = sameRgb(bg, N.HEAT) ? [N.HEAT, 0.62] : sameRgb(bg, N.COOL) ? [N.COOL_GLOW, 0.9] : [bg, 0.42];
+    this.glow(c, 240, 272, 300, strength);
+    this.fadeEdge();
+  }
+
+  // Black over the glow from FADE[0] out, wholly by FADE[1]: smoothstep's
+  // curve, as nestlocal works it out pixel by pixel.
+  fadeEdge() {
+    const id = this.id();
+    const [inner, outer] = FADE;
+    const stops = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1].map((t) => {
+      const a = t * t * (3 - 2 * t);
+      return `<stop offset="${r1(((inner + t * (outer - inner)) / outer) * 1000) / 1000}" stop-color="#000" stop-opacity="${r1(a * 1000) / 1000}"/>`;
+    }).join("");
+    this.defs.push(`<radialGradient id="${id}" cx="240" cy="240" r="${outer}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#000" stop-opacity="0"/>${stops}</radialGradient>`);
+    this.svg.push(`<rect width="480" height="480" fill="url(#${id})"/>`);
   }
 
   glow(c, cx, cy, r, strength) {
