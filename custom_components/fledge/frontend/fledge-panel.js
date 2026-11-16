@@ -1435,6 +1435,30 @@ class FledgePanel extends HTMLElement {
     }
   }
 
+  /** Whether the Nest is online: any entity of its own device available,
+   * as they all share its availability (nestlocal/<serial>/availability), so
+   * one that isn't a thermostat (no climate entity) still shows online. A
+   * drop of under a minute is a reconnect after the Nest slept, not offline. */
+  _online(t) {
+    const up = (t.own || []).some((id) => {
+      const state = this._hass.states[id];
+      return state && state.state !== "unavailable";
+    });
+    this._down = this._down || {};
+    if (up) {
+      delete this._down[t.serial];
+      return true;
+    }
+    const since = this._down[t.serial] ?? (this._down[t.serial] = Date.now());
+    if (Date.now() - since < 60_000) {
+      // Shown again once the minute is up, if still down.
+      clearTimeout(this._downTimer);
+      this._downTimer = setTimeout(() => this._render?.(), 60_000 - (Date.now() - since) + 100);
+      return true;
+    }
+    return false;
+  }
+
   _toolbar() {
     const t = this._current;
     const menu = this._narrow ? `<button class="icon" data-act="menu" aria-label="Sidebar"><ha-icon icon="mdi:menu"></ha-icon></button>` : "";
@@ -1445,8 +1469,7 @@ class FledgePanel extends HTMLElement {
     } else if (t) picker = `<span class="muted">${esc(t.name || t.title)}</span>`;
     let status = "";
     if (t) {
-      const climate = t.climate && this._hass.states[t.climate];
-      const online = climate && climate.state !== "unavailable";
+      const online = this._online(t);
       const build = this._build(true);
       status = `<span class="pill ${online ? "ok" : "bad"}"><span class="dotlet"></span>${online ? "Online" : "Offline"}${build ? ` · Fledge ${esc(build)}` : ""}</span>`;
     }
