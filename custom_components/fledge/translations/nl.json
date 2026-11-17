@@ -149,6 +149,9 @@
     "switch": {
       "keep_screen_on": {
         "name": "Scherm aan houden"
+      },
+      "call_for_heat": {
+        "name": "Warmtevraag"
       }
     },
     "button": {
@@ -234,6 +237,20 @@
         "hot_water": {
           "name": "Warm water",
           "description": "Te vervangen dagen (mon tot en met sun), elk een lijst aan-periodes met een on- en een off-tijd (HH:MM). Zie de README voor een voorbeeld."
+        }
+      }
+    },
+    "call_for_heat": {
+      "name": "Warmtevraag",
+      "description": "Zolang Home Assistant de verwarmingsregeling van de thermostaat heeft: vraag hem de ketel aan te zetten (warmte aan) of niet (warmte uit), eventueel met de ruimtes die erom vragen. De vraag wordt elke minuut vernieuwd; als Home Assistant stopt, gaat de thermostaat terug naar zijn eigen schema.",
+      "fields": {
+        "heat": {
+          "name": "Warmte",
+          "description": "Of er warmte gewenst is."
+        },
+        "rooms": {
+          "name": "Ruimtes",
+          "description": "De ruimtes die erom vragen, getoond op de thermostaat."
         }
       }
     }

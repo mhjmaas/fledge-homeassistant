@@ -88,6 +88,8 @@ BATTERY = vol.Schema({
     vol.Optional("charging"): vol.Any(None, cv.entity_id),
     vol.Optional("plugged"): vol.Any(None, cv.entity_id),
     vol.Optional("power"): vol.Any(None, cv.entity_id),
+    # The power reads negative while charging (as many inverters report it).
+    vol.Optional("power_inverted", default=False): bool,
     vol.Optional("limit"): vol.Any(None, cv.entity_id),
     vol.Optional("low", default=20): vol.All(int, vol.Range(min=0, max=100)),
     vol.Optional("critical", default=10): vol.All(int, vol.Range(min=0, max=100)),
@@ -649,7 +651,7 @@ def battery(hass: HomeAssistant, spec: dict[str, Any] | None) -> dict[str, Any] 
     """The battery face's: its level, what it's doing (charging, plugged
     in, discharging, idle) in a word and in a line, its charge limit, and
     its picture and name. Without a charging entity, power going in counts
-    as charging."""
+    as charging: positive, or negative when the power is marked inverted."""
     spec = spec or {}
     get = lambda key: hass.states.get(spec.get(key) or "")  # noqa: E731
     level_state = get("level")
@@ -659,6 +661,8 @@ def battery(hass: HomeAssistant, spec: dict[str, Any] | None) -> dict[str, Any] 
     low, critical = spec.get("low", 20), spec.get("critical", 10)
     power_state = get("power")
     power = _reading(power_state)
+    if power is not None and spec.get("power_inverted"):
+        power = -power
     flow = ""
     if power_state is not None and power:
         shown = number(hass, power_state).lstrip("-−")

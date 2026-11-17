@@ -222,9 +222,12 @@ const domainOf = (id) => id.split(".")[0];
 const N = {
   WHITE: [255, 255, 255], GREY: [168, 173, 181], DIM: [92, 96, 104], BLACK: [0, 0, 0], HEAT: [241, 90, 0],
   COOL: [26, 111, 216], MEDIA: [63, 209, 195], AMBER: [246, 136, 0], NOW: [255, 246, 214], ACTION: [255, 196, 87],
-  COVER: [120, 170, 255], ECO: [76, 175, 80], WARM: [255, 169, 87], TRACK: [27, 35, 48], FACE: [9, 13, 21],
-  LIFT: [22, 31, 48], SOFT: [255, 225, 205], UNDER: [163, 173, 184],
+  COVER: [120, 170, 255], ECO: [76, 175, 80], WARM: [255, 169, 87], TRACK: [34, 34, 37], FACE: [0, 0, 0],
+  COOL_GLOW: [20, 160, 255], SOFT: [255, 225, 205], UNDER: [163, 173, 184],
 };
+// paint::fade_edge: the face's glow darkens to black from radius 150 to 226
+// (of the display's 240), smoothly, so the glass meets the device's bezel.
+const FADE = [150, 226];
 const TICKS = 147;
 const SPAN = 292;
 const NUMBER = 299;
@@ -263,16 +266,32 @@ class Face {
     return `nf${faceIds}`;
   }
 
-  // paint::face: black (or the Nest's heating orange), or Fledge's dark
-  // face lifting to blue, glowing with what's on.
+  // paint::face: black (or the Nest's heating orange), or Fledge's black
+  // face glowing from the middle with what's on (heating's amber, cooling's
+  // lighter blue), black again by the glass's edge.
   face(bg) {
     if (!this.fledge) {
       this.svg.push(`<rect width="480" height="480" fill="${css(bg)}"/>`);
       return;
     }
     this.svg.push(`<rect width="480" height="480" fill="${css(N.FACE)}"/>`);
-    this.glow(N.LIFT, 240, 210, 330, 0.7);
-    if (!sameRgb(bg, N.BLACK)) this.glow(bg, 240, 272, 300, sameRgb(bg, N.HEAT) ? 0.62 : 0.42);
+    if (sameRgb(bg, N.BLACK)) return;
+    const [c, strength] = sameRgb(bg, N.HEAT) ? [N.HEAT, 0.62] : sameRgb(bg, N.COOL) ? [N.COOL_GLOW, 0.9] : [bg, 0.42];
+    this.glow(c, 240, 272, 300, strength);
+    this.fadeEdge();
+  }
+
+  // Black over the glow from FADE[0] out, wholly by FADE[1]: smoothstep's
+  // curve, as nestlocal works it out pixel by pixel.
+  fadeEdge() {
+    const id = this.id();
+    const [inner, outer] = FADE;
+    const stops = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1].map((t) => {
+      const a = t * t * (3 - 2 * t);
+      return `<stop offset="${r1(((inner + t * (outer - inner)) / outer) * 1000) / 1000}" stop-color="#000" stop-opacity="${r1(a * 1000) / 1000}"/>`;
+    }).join("");
+    this.defs.push(`<radialGradient id="${id}" cx="240" cy="240" r="${outer}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#000" stop-opacity="0"/>${stops}</radialGradient>`);
+    this.svg.push(`<rect width="480" height="480" fill="url(#${id})"/>`);
   }
 
   glow(c, cx, cy, r, strength) {
@@ -653,8 +672,32 @@ const FACES = {
     f.text(240, 284, word, 52, { weight: 500, kind: "medium", c: white ? N.WHITE : accent, max: 340 });
     if (under) f.text(240, 326, under, 24, { max: 320 });
   },
+  // This thermostat's card while Home Assistant decides when to heat
+  // (screens.rs nest_status): whether it's heating and the hot water is on,
+  // and why. No setpoint: the rooms are set elsewhere.
+  nestStatus(f, nest) {
+    f.face(N.BLACK);
+    const row = (y, icon, doing, why, on) => {
+      f.icon(icon, 240, y - 58, 44, on ? HEAT_ON : N.GREY);
+      f.text(240, y, doing, 34, { weight: 500, kind: "medium" });
+      f.line(y + 36, why, N.GREY);
+    };
+    const heating = nest.card.action === "heating";
+    row(nest.water ? 168 : 252, heating ? "mdi:fire" : "mdi:radiator-off", tr(heating ? "screen.nest.heating" : "screen.status.not_heating"), nest.asked.reason, heating);
+    if (nest.water) {
+      const w = nest.water;
+      const on = w.on || nest.boost != null;
+      const why = nest.boost != null ? tr("screen.climate.boost") : !w.schedule ? tr("screen.status.schedule_off")
+        : w.next ? (on ? tr("screen.nest.until", { until: w.next }) : tr("screen.status.next_at", { time: w.next })) : "";
+      row(330, on ? "mdi:water-boiler" : "mdi:water-boiler-off", tr(on ? "screen.status.hot_water_on" : "screen.status.hot_water_off"), why, on);
+    }
+  },
   // This thermostat's own card (screens.rs nest_card).
   nest(f, nest) {
+    if (nest.asked) {
+      FACES.nestStatus(f, nest);
+      return;
+    }
     const card = nest.card;
     const [bg, active] = climateColours(card);
     f.face(bg);
@@ -875,6 +918,26 @@ const THERMO = "@thermostat";
 const OWN_LIMITS = "climate.fledge_own_card";
 const OWN_LIMITS_PROTOCOL = 15;
 // Where Fledge's own build and its check live, among the Nest's entities.
+// Heating's (and hot water's) orange on the status card (screens.rs ON_ORANGE).
+const HEAT_ON = [255, 154, 92];
+// The Nest's heating control phases (nestlocal demand.rs), their messages.
+const HEAT_PHASES = {
+  nest: "heat.phase_nest",
+  on_its_own: "heat.phase_on_its_own",
+  heating: "heat.phase_heating",
+  idle: "heat.phase_idle",
+};
+// Why the Nest is heating or not, as its status card says it (model.rs Asked::reason).
+function heatReason(phase, rooms) {
+  if (phase === "heating") return !rooms.length ? tr("screen.status.heat_wanted") : tn("screen.status.rooms_want", rooms.length, { room: rooms[0] });
+  if (phase === "idle") return tr("screen.status.no_rooms");
+  return tr("screen.status.own_schedule");
+}
+// The next "HH:MM" after `clock` among a day's hot water periods ({on, off}).
+function nextEdge(periods, clock) {
+  return (Array.isArray(periods) ? periods : []).flatMap((p) => [p?.on, p?.off])
+    .filter((x) => typeof x === "string" && x > clock).sort()[0] || null;
+}
 const own = (t, domain, end) => (t.own || []).find((id) => id.startsWith(`${domain}.`) && id.endsWith(end)) || null;
 // The card protocol that puts the thermostat anywhere (nestlocal ui::PROTOCOL).
 const ANYWHERE = 5;
@@ -919,6 +982,10 @@ class FledgePanel extends HTMLElement {
     this.shadowRoot.addEventListener("dragover", (e) => this._dragOver(e));
     this.shadowRoot.addEventListener("drop", (e) => this._dropped(e));
     this.shadowRoot.addEventListener("dragend", () => this._dragEnd());
+    // A redraw held while a picker was in use: drawn once it's left.
+    this.shadowRoot.addEventListener("focusout", () => setTimeout(() => {
+      if (this._held && !this._picking()) this._render();
+    }));
   }
 
   set hass(hass) {
@@ -1242,7 +1309,23 @@ class FledgePanel extends HTMLElement {
     const boost = state("_hot_water_boost", "select")?.state;
     // As the Nest names its own card: the name given here, else its "Thermostat".
     const named = { ...card, name: this._draft.device_name.trim() || tr("screen.nest.thermostat") };
-    return { card: named, eco: climate?.attributes.preset_mode === "eco", eta, next, boost: /^\d+$/.test(boost || "") ? Number(boost) : null };
+    const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    // While Home Assistant decides when to heat (nestlocal demand.rs), its
+    // card is a status: what it's doing and why, and the hot water.
+    let asked = null;
+    let water = null;
+    const phase = state("_heat_control_phase");
+    if (phase && ["heating", "idle", "on_its_own"].includes(phase.state)) {
+      asked = { phase: phase.state, reason: heatReason(phase.state, phase.attributes.rooms || []) };
+      const schedule = state("_hot_water_schedule", "switch");
+      if (schedule) {
+        const active = state("_hot_water_active", "binary_sensor") || state("_hot_water", "binary_sensor");
+        const times = state("_hot_water_times")?.attributes || {};
+        const next = nextEdge(times[DAYS[now.getDay()]], clock) || nextEdge(times[DAYS[(now.getDay() + 1) % 7]], "");
+        water = { on: active?.state === "on", schedule: schedule.state === "on", next };
+      }
+    }
+    return { card: named, eco: climate?.attributes.preset_mode === "eco", eta, next, boost: /^\d+$/.test(boost || "") ? Number(boost) : null, asked, water };
   }
 
   _card(id) {
@@ -1293,9 +1376,27 @@ class FledgePanel extends HTMLElement {
 
   // Rendering
 
+  // A picker of Home Assistant's (entity, icon) with the focus: open, or
+  // being typed in. Drawing the page again would throw it away.
+  _picking() {
+    const at = this.shadowRoot.activeElement;
+    return !!at && /^HA-.*PICKER$/.test(at.tagName);
+  }
+
+  // Lets go of a picker after its choice, so the page can be drawn again.
+  _letGo() {
+    let at = this.shadowRoot.activeElement;
+    while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
+    at?.blur?.();
+  }
+
   _render() {
     // Not while a row is dragged: that would drop it. Drawn as it lands.
     if (!this._hass || this._drag != null) return;
+    // Nor while a picker is in use: entities change all the time, and each
+    // redraw closed its list (#7). Drawn once it's left.
+    this._held = this._picking();
+    if (this._held) return;
     const t = this._current;
     let body;
     if (!this._thermostats) body = `<div class="empty">${esc(tr("common.loading"))}</div>`;
@@ -1363,6 +1464,30 @@ class FledgePanel extends HTMLElement {
     }
   }
 
+  /** Whether the Nest is online: any entity of its own device available,
+   * as they all share its availability (nestlocal/<serial>/availability), so
+   * one that isn't a thermostat (no climate entity) still shows online. A
+   * drop of under a minute is a reconnect after the Nest slept, not offline. */
+  _online(t) {
+    const up = (t.own || []).some((id) => {
+      const state = this._hass.states[id];
+      return state && state.state !== "unavailable";
+    });
+    this._down = this._down || {};
+    if (up) {
+      delete this._down[t.serial];
+      return true;
+    }
+    const since = this._down[t.serial] ?? (this._down[t.serial] = Date.now());
+    if (Date.now() - since < 60_000) {
+      // Shown again once the minute is up, if still down.
+      clearTimeout(this._downTimer);
+      this._downTimer = setTimeout(() => this._render?.(), 60_000 - (Date.now() - since) + 100);
+      return true;
+    }
+    return false;
+  }
+
   _toolbar() {
     const t = this._current;
     const menu = this._narrow ? `<button class="icon" data-act="menu" aria-label="${esc(tr("toolbar.sidebar"))}"><ha-icon icon="mdi:menu"></ha-icon></button>` : "";
@@ -1373,8 +1498,7 @@ class FledgePanel extends HTMLElement {
     } else if (t) picker = `<span class="muted">${esc(t.name || t.title)}</span>`;
     let status = "";
     if (t) {
-      const climate = t.climate && this._hass.states[t.climate];
-      const online = climate && climate.state !== "unavailable";
+      const online = this._online(t);
       const build = this._build(true);
       status = `<span class="pill ${online ? "ok" : "bad"}"><span class="dotlet"></span>${esc(tr(online ? "toolbar.online" : "toolbar.offline"))}${build ? ` · Fledge ${esc(build)}` : ""}</span>`;
     }
@@ -1962,6 +2086,7 @@ class FledgePanel extends HTMLElement {
           ${this._entityField("gbat_plugged", "binary_sensor,switch,input_boolean,sensor", tr("battery.plugged"), b.plugged)}</div>
         <div class="split">${this._entityField("gbat_power", "sensor", tr("battery.power"), b.power)}
           ${this._entityField("gbat_limit", "number,input_number,sensor", tr("battery.limit"), b.limit)}</div>
+        ${b.power ? `<div class="kv flat"><span>${esc(tr("battery.invert"))}<span class="sub">${esc(tr("battery.invert_sub"))}</span></span>${sw("gbatinvert", b.power_inverted, tr("battery.invert"))}</div>` : ""}
         <div class="split">${percent("low", tr("battery.low"), b.low ?? 20)}${percent("critical", tr("battery.critical"), b.critical ?? 10)}</div>
         <p class="muted small">${esc(tr("battery.line_about"))}</p>
         ${text("label", tr("glance.called"), tr("glance.its_name"), b.label)}
@@ -2137,8 +2262,26 @@ class FledgePanel extends HTMLElement {
         <h2>${esc(tr("tab.thermostat"))}</h2>
         ${id ? `<div class="kv"><span>${esc(tr("role.act"))}<span class="sub">${esc(tr(acting ? "role.act_on" : "role.act_off"))}</span></span>${this._switch("role", acting, tr("role.act"))}</div>` : ""}
         ${body}
+        ${acting ? this._heatControl() : ""}
         ${this._wwn()}
       </section>`;
+  }
+
+  // Heating control by Home Assistant (nestlocal demand.rs): something in
+  // Home Assistant decides when to heat, through the Call for heat switch.
+  _heatControl() {
+    const t = this._current;
+    const id = own(t, "switch", "_heat_control");
+    if (!id) return "";
+    const on = this._hass.states[id]?.state === "on";
+    const phase = this._hass.states[own(t, "sensor", "_heat_control_phase")];
+    const call = t.entities?.call_for_heat;
+    const asking = call && this._hass.states[call];
+    const rooms = asking?.attributes.rooms || [];
+    const status = phase && HEAT_PHASES[phase.state] && tr(HEAT_PHASES[phase.state]);
+    return `<div class="kv"><span>${esc(tr("heat.title"))}<span class="sub">${esc(on ? status || tr("screen.state.on") : tr("heat.off"))}</span></span>${this._switch("heatctl", on, tr("heat.title"))}</div>
+      ${on && call ? `<div class="kv"><span class="muted">${esc(tr("heat.call"))}<span class="sub">${esc(asking?.state === "on" ? (rooms.length ? tr("heat.asking_for", { rooms: rooms.join(", ") }) : tr("heat.asking")) : tr("heat.not_asking"))}</span></span><span class="mono small">${esc(call)}</span></div>` : ""}
+      <p class="muted small">${esc(tr(on ? "heat.about_on" : "heat.about_off"))}</p>`;
   }
 
   // A Heat Link model heating without its Heat Link (nestlocal's
@@ -2341,6 +2484,12 @@ class FledgePanel extends HTMLElement {
         break;
       }
       case "gdim": d.glance.night.dim = !d.glance.night.dim; this._glanceSoon(); break;
+      case "gbatinvert": {
+        const b = (this._glanceEditing().own.battery ||= {});
+        b.power_inverted = !b.power_inverted;
+        this._glanceSoon();
+        break;
+      }
       case "gallday": d.glance.skip_all_day = !d.glance.skip_all_day; this._glanceSoon(); break;
       case "select": this._sel = Number(el.dataset.i); break;
       case "turn": {
@@ -2428,6 +2577,15 @@ class FledgePanel extends HTMLElement {
         break;
       }
       case "keepon": this._hass.callService("switch", "toggle", { entity_id: this._current.entities.keep_screen_on }); return;
+      case "heatctl": {
+        const id = own(this._current, "switch", "_heat_control");
+        const on = this._hass.states[id]?.state === "on";
+        if (!confirm(tr(on ? "heat.ask_off" : "heat.ask_on"))) return;
+        this._hass.callService("switch", on ? "turn_off" : "turn_on", { entity_id: id })
+          .then(() => this._flash(tr(on ? "heat.done_off" : "heat.done_on")),
+            (err) => { this._error = err?.message || String(err); this._render(); });
+        return;
+      }
       case "wwn": {
         const id = this._current.wwn_switch;
         const on = this._hass.states[id]?.state === "on";
@@ -2639,6 +2797,7 @@ class FledgePanel extends HTMLElement {
     const key = e.target?.dataset?.pick;
     if (!key) return;
     e.stopPropagation();
+    this._letGo();
     this._choose(key, e.detail?.value || "");
   }
 
