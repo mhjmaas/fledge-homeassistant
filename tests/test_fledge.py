@@ -1354,6 +1354,12 @@ async def test_the_battery_face_says_what_the_battery_is_doing(hass: HomeAssista
     hass.states.async_set("sensor.wallbox_power", "-1.4", {"unit_of_measurement": "kW"})
     home = glance.battery(hass, {"level": "sensor.car_battery", "power": "sensor.wallbox_power", "label": "Home battery"})
     assert (home["status"], home["text"], home["label"]) == ("discharging", "Discharging · 1.4 kW", "Home battery")
+    # A power that reads negative going in, as a GoodWe's does, is marked inverted.
+    inverted = {"level": "sensor.car_battery", "power": "sensor.wallbox_power", "power_inverted": True}
+    assert glance.battery(hass, inverted)["text"] == "Charging · 1.4 kW"
+    hass.states.async_set("sensor.wallbox_power", "1.3", {"unit_of_measurement": "kW"})
+    assert glance.battery(hass, inverted)["text"] == "Discharging · 1.3 kW"
+    assert glance.settings({"layout": "battery", "battery": {"level": "sensor.car_battery"}})["battery"]["power_inverted"] is False
     assert glance.battery(hass, {}) is None
     face = faces.settings({"layout": "battery", "battery": spec})
     assert faces.glance_raw(face, {})["battery"]["level"] == "sensor.car_battery"

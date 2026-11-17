@@ -2067,8 +2067,9 @@ class FledgePanel extends HTMLElement {
           ${this._entityField("gbat_plugged", "binary_sensor,switch,input_boolean,sensor", "Plugged in (optional)", b.plugged)}</div>
         <div class="split">${this._entityField("gbat_power", "sensor", "Power (optional)", b.power)}
           ${this._entityField("gbat_limit", "number,input_number,sensor", "Charge limit (optional)", b.limit)}</div>
+        ${b.power ? `<div class="kv flat"><span>Negative while charging<span class="sub">For a power that reads below zero going in, as many home batteries do</span></span>${sw("gbatinvert", b.power_inverted, "Negative while charging")}</div>` : ""}
         <div class="split">${percent("low", "Low below (%)", b.low ?? 20)}${percent("critical", "Very low below (%)", b.critical ?? 10)}</div>
-        <p class="muted small">The line under the number is worked out from these: Charging · 7.2 kW, Plugged in, or a discharge's power. Without a charging entity, power going in counts as charging. The white notch on the ring is the charge limit.</p>
+        <p class="muted small">The line under the number is worked out from these: Charging · 7.2 kW, Plugged in, or a discharge's power. Without a charging entity, power going in counts as charging (above zero, or below with Negative while charging on). The white notch on the ring is the charge limit.</p>
         ${text("label", "Called", "Its name", b.label)}
         <div class="split">${customElements.get("ha-icon-picker")
           ? `<ha-icon-picker data-pick="gbat_icon" data-label="Icon" data-value="${esc(b.icon || "")}"></ha-icon-picker>`
@@ -2474,6 +2475,12 @@ class FledgePanel extends HTMLElement {
         break;
       }
       case "gdim": d.glance.night.dim = !d.glance.night.dim; this._glanceSoon(); break;
+      case "gbatinvert": {
+        const b = (this._glanceEditing().own.battery ||= {});
+        b.power_inverted = !b.power_inverted;
+        this._glanceSoon();
+        break;
+      }
       case "gallday": d.glance.skip_all_day = !d.glance.skip_all_day; this._glanceSoon(); break;
       case "select": this._sel = Number(el.dataset.i); break;
       case "turn": {
