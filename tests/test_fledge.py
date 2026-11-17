@@ -229,6 +229,19 @@ def test_commands_reach_only_what_was_chosen_only_as_allowed():
     assert [command(p) for p in refused] == [None] * len(refused)
 
 
+def test_a_fahrenheit_climate_takes_its_targets_in_fahrenheit():
+    # Home Assistant in °F gives a climate's range and target in °F, and
+    # the ring sends °F back (issue 13: 68 was refused as over 35).
+    states = {"climate.nest": State("climate.nest", "heat", temperature=70, min_temp=50, max_temp=90)}
+    command = lambda value: cards.command({"id": "climate.nest", "action": "temperature", "value": value},
+                                          ["climate.nest"], states.get)
+    assert command(68) == cards.Call("climate", "set_temperature", "climate.nest", {"temperature": 68})
+    assert command(90).data == {"temperature": 90}
+    assert command(95) is None and command(45) is None, "only within its own range"
+    states["climate.nest"] = State("climate.nest", "heat", temperature=21, min_temp=7, max_temp=35)
+    assert command(21).data == {"temperature": 21} and command(68) is None, "°C stays °C"
+
+
 def test_album_art_is_cropped_square_and_small():
     from io import BytesIO
     from PIL import Image
@@ -607,7 +620,7 @@ async def test_the_panel_lays_out_the_cards_and_saves_them(hass: HomeAssistant, 
     shown = found[0]
     assert (shown["entry_id"], shown["serial"], shown["climate"], shown["loaded"]) == \
         (entry.entry_id, SERIAL, "climate.nest_thermostat", True)
-    assert set(shown["entities"]) == {"keep_screen_on", "wake_to", "wake_screen", "across_the_room", "close_up",
+    assert set(shown["entities"]) == {"keep_screen_on", "call_for_heat", "wake_to", "wake_screen", "across_the_room", "close_up",
                                       "glance_layout", "night_glance"}
 
     await client.send_json_auto_id({"type": "fledge/preview", "entities": ["light.lamp", "light.gone"],
@@ -733,6 +746,29 @@ async def test_eco_keeps_its_temperature(hass: HomeAssistant, mqtt_mock) -> None
     assert not set_temperature
 
 
+async def test_heat_control_keeps_the_target_while_the_schedule_is_aside(hass: HomeAssistant, mqtt_mock) -> None:
+    """A schedule written while Call for heat decides goes to the one kept
+    aside: the target is Call for heat's alone, so it isn't set now."""
+    await _with_schedules(hass)
+    er.async_get(hass).async_get_or_create("sensor", "mqtt", f"nestlocal_{SERIAL.lower()}_heat_control_phase",
+                                           device_id=_thermostat(hass).id,
+                                           suggested_object_id="nest_thermostat_heating_control")
+    hass.states.async_set("climate.nest_thermostat", "heat", {"temperature": 30, "preset_mode": "none"})
+    set_temperature = async_mock_service(hass, "climate", "set_temperature")
+    allday = {d: [{"time": "00:00", "temp": 19}] for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
+    for phase in ("heating", "idle"):
+        hass.states.async_set("sensor.nest_thermostat_heating_control", phase)
+        await hass.services.async_call(DOMAIN, "set_schedule", {
+            "entity_id": "climate.nest_thermostat", "heating": allday}, blocking=True)
+        assert not set_temperature, phase
+    assert len(_sent(mqtt_mock, f"nestlocal/{SERIAL}/set/heating_times")) == 2, "the schedule is still written"
+    # The Nest's own again: what applies now is set now.
+    hass.states.async_set("sensor.nest_thermostat_heating_control", "on_its_own")
+    await hass.services.async_call(DOMAIN, "set_schedule", {
+        "entity_id": "climate.nest_thermostat", "heating": allday}, blocking=True)
+    assert [c.data["temperature"] for c in set_temperature] == [19]
+
+
 async def test_a_schedule_the_nest_would_refuse_is_refused_here(hass: HomeAssistant, mqtt_mock) -> None:
     import pytest
     import voluptuous as vol
@@ -768,7 +804,8 @@ async def test_the_cards_find_the_nest_s_schedules(hass: HomeAssistant, mqtt_moc
     assert (await client.receive_json())["result"] == {
         "serial": SERIAL, "climate": "climate.nest_thermostat", "heating": "sensor.nest_thermostat_heating_times",
         "hot_water": "sensor.nest_thermostat_hot_water_times",
-        "hot_water_switch": "switch.nest_thermostat_hot_water_schedule", "auto_schedule": None}
+        "hot_water_switch": "switch.nest_thermostat_hot_water_schedule", "auto_schedule": None,
+        "heat_control": None}
     await client.send_json_auto_id({"type": "fledge/schedule", "entity_id": "climate.elsewhere"})
     assert (await client.receive_json())["error"]["code"] == "not_found"
 
@@ -1336,6 +1373,12 @@ async def test_the_battery_face_says_what_the_battery_is_doing(hass: HomeAssista
     hass.states.async_set("sensor.wallbox_power", "-1.4", {"unit_of_measurement": "kW"})
     home = glance.battery(hass, {"level": "sensor.car_battery", "power": "sensor.wallbox_power", "label": "Home battery"})
     assert (home["status"], home["text"], home["label"]) == ("discharging", "Discharging · 1.4 kW", "Home battery")
+    # A power that reads negative going in, as a GoodWe's does, is marked inverted.
+    inverted = {"level": "sensor.car_battery", "power": "sensor.wallbox_power", "power_inverted": True}
+    assert glance.battery(hass, inverted)["text"] == "Charging · 1.4 kW"
+    hass.states.async_set("sensor.wallbox_power", "1.3", {"unit_of_measurement": "kW"})
+    assert glance.battery(hass, inverted)["text"] == "Discharging · 1.3 kW"
+    assert glance.settings({"layout": "battery", "battery": {"level": "sensor.car_battery"}})["battery"]["power_inverted"] is False
     assert glance.battery(hass, {}) is None
     face = faces.settings({"layout": "battery", "battery": spec})
     assert faces.glance_raw(face, {})["battery"]["level"] == "sensor.car_battery"
@@ -1379,3 +1422,39 @@ def test_the_nest_s_own_card_takes_limits_too():
     nest = State("climate.nest", "heat", temperature=20, min_temp=9, max_temp=32, target_temp_step=0.5)
     card = cards.climate(nest, options["limits"][own])
     assert (card["min"], card["max"], card["temperature_whole"]) == (16, 24, [9, 32])
+
+
+async def test_call_for_heat_asks_while_heating_control_is_home_assistant_s(hass: HomeAssistant, mqtt_mock,
+                                                                             freezer) -> None:
+    from datetime import timedelta
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=SERIAL, data={"serial": SERIAL},
+                            options={"entities": [], "wake": "chooser"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    [switch] = [e for e in hass.states.async_entity_ids("switch") if e.endswith("call_for_heat")]
+    topic = f"nestlocal/{SERIAL}/set/call_for_heat"
+    asks = lambda: [json.loads(c.args[1]) for c in mqtt_mock.async_publish.call_args_list if c.args[0] == topic]
+
+    assert hass.states.get(switch).state == "unavailable", "the Nest decides"
+    async_fire_mqtt_message(hass, f"nestlocal/{SERIAL}/state", json.dumps({"heat_control": True,
+                                                                             "heat_control_phase": "on_its_own"}))
+    await hass.async_block_till_done()
+    assert hass.states.get(switch).state == "off"
+    assert asks()[-1] == {"heat": False, "lease": 600, "rooms": []}, "asked at once"
+
+    await hass.services.async_call(DOMAIN, "call_for_heat", {"entity_id": switch, "heat": True, "rooms": ["Office"]},
+                                   blocking=True)
+    assert asks()[-1] == {"heat": True, "lease": 600, "rooms": ["Office"]}
+    assert hass.states.get(switch).attributes["rooms"] == ["Office"]
+
+    n = len(asks())
+    freezer.tick(timedelta(seconds=61))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert len(asks()) == n + 1 and asks()[-1]["heat"], "renewed every minute"
+
+    await hass.services.async_call("switch", "turn_off", {"entity_id": switch}, blocking=True)
+    assert asks()[-1] == {"heat": False, "lease": 600, "rooms": []}
