@@ -11,14 +11,21 @@
 //
 // The week comes from the Nest's Heating times / Hot water times sensors
 // (found through the fledge/schedule websocket command); saving and Copy to
-// days write with fledge.set_schedule, every changed day in one call.
+// days write with fledge.set_schedule, every changed day in one call. Its
+// words are in the viewer's language (fledge-i18n.js).
+
+// Imported with this module's version, as the cards themselves are.
+const { t: tr, tn, use, languageOf, language } = await import(new URL(`./fledge-i18n.js${new URL(import.meta.url).search}`, import.meta.url));
+
 (() => {
   if (customElements.get('fledge-heating-schedule')) return;
 
   const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-  const SHORT = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
-  const LONG = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' };
-  const QUICK = [['Weekdays', DAYS.slice(0, 5)], ['Weekend', DAYS.slice(5)], ['Every day', DAYS]];
+  // Each day's name, short (SHORT.mon) and whole (LONG.mon), in the language spoken as it's read.
+  const SHORT = new Proxy({}, { get: (_, d) => tr(`day_short.${String(d)}`) });
+  const LONG = new Proxy({}, { get: (_, d) => tr(`day.${String(d)}`) });
+  // Quick choices of days to copy to: each a message ID and its days.
+  const QUICK = [['schedule.weekdays', DAYS.slice(0, 5)], ['schedule.weekend', DAYS.slice(5)], ['schedule.every_day', DAYS]];
   const HEATING = 'heating';
   const WATER = 'hot_water';
   const DAY_MIN = 1440;
@@ -28,7 +35,8 @@
 
   const toMin = (s) => { const [h, m] = String(s).trim().split(':').map((x) => parseInt(x, 10)); return (h || 0) * 60 + (m || 0); };
   const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  const dur = (m) => (m >= 60 ? (m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m / 60}h`) : `${m}m`);
+  const dur = (m) => (m >= 60 ? (m % 60 ? tr('schedule.hours_minutes', { hours: Math.floor(m / 60), minutes: m % 60 })
+    : tr('schedule.hours', { hours: m / 60 })) : tr('schedule.minutes', { minutes: m }));
   const fmtT = (t) => (t == null || isNaN(t) ? '–' : `${(Math.round(t * 2) / 2).toString()}°`);
   const todayIdx = () => (new Date().getDay() + 6) % 7;
   const nowMin = () => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); };
@@ -36,9 +44,9 @@
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const listDays = (ds) => {
     const k = DAYS.filter((d) => ds.includes(d));
-    if (k.length === 7) return 'every day';
-    if (same(k, DAYS.slice(0, 5))) return 'weekdays';
-    if (same(k, DAYS.slice(5))) return 'the weekend';
+    if (k.length === 7) return tr('schedule.days_every');
+    if (same(k, DAYS.slice(0, 5))) return tr('schedule.days_weekdays');
+    if (same(k, DAYS.slice(5))) return tr('schedule.days_weekend');
     // Runs of three or more as Tue–Fri.
     const parts = [];
     for (let i = 0; i < k.length;) {
@@ -62,7 +70,7 @@
       write: (list) => [...list].sort((a, b) => a.m - b.m).map((p) => ({ time: hhmm(p.m), temp: p.t })),
       problem: (list) => {
         const seen = new Set();
-        for (const p of list) { if (seen.has(p.m)) return `Two changes at ${hhmm(p.m)}`; seen.add(p.m); }
+        for (const p of list) { if (seen.has(p.m)) return tr('schedule.two_changes', { time: hhmm(p.m) }); seen.add(p.m); }
         return '';
       },
     },
@@ -75,8 +83,8 @@
       write: (list) => [...list].sort((a, b) => a.s - b.s).map((p) => ({ on: hhmm(p.s), off: hhmm(p.e % DAY_MIN) })),
       problem: (list) => {
         const l = [...list].sort((a, b) => a.s - b.s);
-        for (let i = 1; i < l.length; i++) if (l[i].s < l[i - 1].e) return `${hhmm(l[i].s)} overlaps the time before it`;
-        if (l.length && l[l.length - 1].e > DAY_MIN + l[0].s) return 'The last time runs into the first';
+        for (let i = 1; i < l.length; i++) if (l[i].s < l[i - 1].e) return tr('schedule.overlaps', { time: hhmm(l[i].s) });
+        if (l.length && l[l.length - 1].e > DAY_MIN + l[0].s) return tr('schedule.runs_into_first');
         return '';
       },
     },
@@ -188,7 +196,7 @@
       }).join('');
     }
     const spans = waterSpans(week, d);
-    if (!spans.length) return opts.labels === false ? '' : '<span class="empty">Off all day</span>';
+    if (!spans.length) return opts.labels === false ? '' : `<span class="empty">${esc(tr('schedule.off_all_day'))}</span>`;
     return spans.map((b) => {
       const w = ((b.e - b.s) / DAY_MIN) * 100;
       return `<div class="blk${opts.paused ? ' paused' : ''}" style="left:${(b.s / 14.4).toFixed(3)}%;width:${w.toFixed(3)}%" title="${hhmm(b.s)}–${hhmm(b.e)}">`
@@ -203,9 +211,9 @@
     const mins = [0, 15, 30, 45].includes(mm) ? [0, 15, 30, 45] : [0, 15, 30, 45, mm].sort((a, b) => a - b);
     const opt = (v, on) => `<option value="${v}"${on ? ' selected' : ''}>${String(v).padStart(2, '0')}</option>`;
     return `<span class="tf ${role}"><ha-icon icon="mdi:clock-outline"></ha-icon>`
-      + `<select class="tsel hh" aria-label="${label}, hour">${Array.from({ length: 24 }, (_, v) => opt(v, v === h)).join('')}</select>`
+      + `<select class="tsel hh" aria-label="${esc(tr('schedule.hour_of', { label }))}">${Array.from({ length: 24 }, (_, v) => opt(v, v === h)).join('')}</select>`
       + '<span class="colon">:</span>'
-      + `<select class="tsel mm" aria-label="${label}, minutes">${mins.map((v) => opt(v, v === mm)).join('')}</select></span>`;
+      + `<select class="tsel mm" aria-label="${esc(tr('schedule.minutes_of', { label }))}">${mins.map((v) => opt(v, v === mm)).join('')}</select></span>`;
   };
   // Calls back with the minutes of the day as either picker changes.
   const onTime = (field, fn) => {
@@ -229,8 +237,8 @@
           { name: 'name', selector: { text: {} } },
           { name: 'edit', selector: { text: {} } },
         ],
-        computeLabel: (s) => ({ entity: 'Nest thermostat', name: 'Name', edit: 'Edit in this popup instead (optional)' }[s.name]),
-        computeHelper: (s) => (s.name === 'edit' ? "A link like #heating_schedule to your own popup with the editor card; left empty, the card's own editor opens." : undefined),
+        computeLabel: (s) => tr({ entity: 'schedule.form_entity', name: 'schedule.form_name', edit: 'schedule.form_edit' }[s.name]),
+        computeHelper: (s) => (s.name === 'edit' ? tr('schedule.form_edit_help') : undefined),
       };
     }
     static getStubConfig(hass) {
@@ -241,7 +249,7 @@
     get kind() { return this.constructor.kind; }
 
     setConfig(config) {
-      if (!config || !config.entity) throw new Error('Choose the Nest thermostat (entity)');
+      if (!config || !config.entity) throw new Error(tr('schedule.no_entity'));
       this._config = config;
       this._sig = '';
       if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
@@ -253,9 +261,11 @@
     set hass(hass) {
       this._hass = hass;
       if (this._dialog) this._dialog.hass = hass;
+      // The viewer's language, once its words have come.
+      if (languageOf(hass) !== language()) use(hass).then((changed) => { if (changed) { this._sig = ''; this._render(); } });
       if (!this._ids && !this._looking) {
         this._looking = true;
-        lookup(hass, this._config.entity).then((r) => { this._ids = r; this._err = ''; }, (e) => { this._err = (e && e.message) || 'Not found'; })
+        lookup(hass, this._config.entity).then((r) => { this._ids = r; this._err = ''; }, (e) => { this._err = (e && e.message) || tr('schedule.not_found'); })
           .finally(() => { this._looking = false; this._sig = ''; this._render(); });
       }
       this._render();
@@ -277,7 +287,7 @@
       document.body.appendChild(dlg);
     }
 
-    _title() { return this._config.name || (this.kind === HEATING ? 'Heating' : 'Hot water'); }
+    _title() { return this._config.name || tr(this.kind === HEATING ? 'schedule.heating' : 'schedule.hot_water'); }
 
     _status(week) {
       const hass = this._hass;
@@ -292,11 +302,14 @@
           const p = (week[DAYS[(ti + off) % 7]] || []).find((x) => off > 0 || x.m > n);
           if (p) next = { ...p, off };
         }
-        const when = next && (next.off === 0 ? '' : next.off === 1 ? 'tomorrow ' : `${SHORT[DAYS[(ti + next.off) % 7]]} `);
         let line;
-        if (!clim || clim.state === 'off') line = 'Heating off';
-        else if (eco) line = `Eco · the schedule's on hold`;
-        else line = next ? `Set to ${fmtT(target)} · ${fmtT(next.t)} ${when}at ${hhmm(next.m)}` : `Set to ${fmtT(target)}`;
+        if (!clim || clim.state === 'off') line = tr('schedule.heating_off');
+        else if (eco) line = tr('schedule.eco');
+        else if (!next) line = tr('schedule.set_to', { target: fmtT(target) });
+        else {
+          const values = { target: fmtT(target), next: fmtT(next.t), time: hhmm(next.m), day: this._dayAfter(ti, next.off) };
+          line = tr(next.off === 0 ? 'schedule.set_to_next' : 'schedule.set_to_next_day', values);
+        }
         return { line, pill: isNaN(target) ? '–' : fmtT(target), lit: !!heating, icon: heating ? 'mdi:fire' : 'mdi:thermostat', paused: false };
       }
       const sw = this._ids.hot_water_switch && hass.states[this._ids.hot_water_switch];
@@ -309,13 +322,20 @@
           if ((off > 0 || p.s > n) && !p.spill) { next = { ...p, off }; break; }
         }
       }
-      const when = (x) => (x.off === 0 ? '' : x.off === 1 ? 'tomorrow ' : `${SHORT[DAYS[(ti + x.off) % 7]]} `);
+      // The next time on: "06:30", or "tomorrow 06:30".
+      const at = (x, time) => tr(x.off === 0 ? 'schedule.next_at' : 'schedule.next_at_day', { day: this._dayAfter(ti, x.off), time });
       let line;
-      if (!on) line = 'Schedule paused · hot water off';
-      else if (cur) line = `On until ${hhmm(cur.e % DAY_MIN)}${next ? ` · next ${when(next)}${hhmm(next.s)}` : ''}`;
-      else line = next ? `Off now · next ${when(next)}${hhmm(next.s)}–${hhmm(next.e % DAY_MIN)}` : 'No hot water times';
-      return { line, pill: on ? 'On' : 'Paused', lit: on, icon: on ? (cur ? 'mdi:water-boiler' : 'mdi:calendar-clock') : 'mdi:pause', paused: !on };
+      if (!on) line = tr('schedule.paused');
+      else if (cur) {
+        line = tr('schedule.on_until', { time: hhmm(cur.e % DAY_MIN) });
+        if (next) line += ` · ${at(next, hhmm(next.s))}`;
+      } else if (next) line = tr('schedule.off_now', { next: at(next, `${hhmm(next.s)}–${hhmm(next.e % DAY_MIN)}`) });
+      else line = tr('schedule.no_water_times');
+      return { line, pill: tr(on ? 'schedule.on' : 'schedule.paused_pill'), lit: on, icon: on ? (cur ? 'mdi:water-boiler' : 'mdi:calendar-clock') : 'mdi:pause', paused: !on };
     }
+
+    // A day `off` days after today's (`ti`), in words: tomorrow, or its short name.
+    _dayAfter(ti, off) { return off === 1 ? tr('schedule.tomorrow') : SHORT[DAYS[(ti + off) % 7]]; }
 
     _pill(e) {
       e.stopPropagation();
@@ -339,21 +359,21 @@
       this._sig = sig;
       const today = DAYS[todayIdx()];
       let body;
-      if (this._err) body = `<div class="hint">${esc(this._config.entity)} isn't a Nest running Fledge.</div>`;
-      else if (!week) body = `<div class="hint">${this._ids ? `No ${this.kind === HEATING ? 'heating' : 'hot water'} schedule from this Nest yet.` : 'Loading…'}</div>`;
+      if (this._err) body = `<div class="hint">${esc(tr('schedule.not_fledge', { entity: this._config.entity }))}</div>`;
+      else if (!week) body = `<div class="hint">${esc(this._ids ? tr(this.kind === HEATING ? 'schedule.no_heating' : 'schedule.no_hot_water') : tr('common.loading'))}</div>`;
       else {
         body = `<div class="week">${DAYS.map((d) => `
-          <button class="row${d === today ? ' today' : ''}" data-day="${d}" aria-label="Edit ${LONG[d]}">
+          <button class="row${d === today ? ' today' : ''}" data-day="${d}" aria-label="${esc(tr('schedule.edit_day', { day: LONG[d] }))}">
             <span class="day">${SHORT[d]}</span>
             <span class="bar">${bars(this.kind, week, d, { paused: st.paused })}${d === today ? `<span class="now" style="left:${(n / 14.4).toFixed(3)}%"></span>` : ''}</span>
           </button>`).join('')}</div>${AXIS}
-          <button class="btn wide edit"><ha-icon icon="${ICON.edit}"></ha-icon>Edit schedule</button>`;
+          <button class="btn wide edit"><ha-icon icon="${ICON.edit}"></ha-icon>${esc(tr('schedule.edit'))}</button>`;
       }
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}</style>
         <ha-card>
           <div class="head">
             <div class="titles"><div class="title">${esc(this._title())}</div><div class="line">${st ? esc(st.line) : '&nbsp;'}</div></div>
-            ${st ? `<button class="pill${st.lit ? ' lit' : ''}" aria-label="${this.kind === HEATING ? 'Thermostat' : 'Pause or resume the schedule'}"><ha-icon icon="${st.icon}"></ha-icon>${st.pill}</button>` : ''}
+            ${st ? `<button class="pill${st.lit ? ' lit' : ''}" aria-label="${esc(tr(this.kind === HEATING ? 'kind.thermostat' : 'schedule.pause'))}"><ha-icon icon="${st.icon}"></ha-icon>${st.pill}</button>` : ''}
           </div>
           ${body}
         </ha-card>`;
@@ -440,7 +460,7 @@
     get kind() { return this._kind || this.constructor.kind; }
 
     setConfig(config) {
-      if (!config || !config.entity) throw new Error('Choose the Nest thermostat (entity)');
+      if (!config || !config.entity) throw new Error(tr('schedule.no_entity'));
       this._config = config;
       this._kind = config.kind || null;
       this._drafts = {};
@@ -467,9 +487,10 @@
     set day(d) { this._day = d; }
     set hass(hass) {
       this._hass = hass;
+      if (languageOf(hass) !== language()) use(hass).then((changed) => { if (changed) this._render(true); });
       if (!this._ids && !this._looking) {
         this._looking = true;
-        lookup(hass, this._config.entity).then((r) => { this._ids = r; this._err = ''; }, (e) => { this._err = (e && e.message) || 'Not found'; })
+        lookup(hass, this._config.entity).then((r) => { this._ids = r; this._err = ''; }, (e) => { this._err = (e && e.message) || tr('schedule.not_found'); })
           .finally(() => { this._looking = false; this._sig = ''; this._render(true); });
       }
       this._render();
@@ -542,11 +563,11 @@
           const late = this._pending();
           if (!late.length) return;
           late.forEach((d) => delete this._drafts[d].pending);
-          this._error = `The Nest hasn't shown ${listDays(late)} yet. Is it online? Save again to retry.`;
+          this._error = tr('schedule.not_shown', { days: listDays(late) });
           this._render(true);
         }, CONFIRM_MS);
         this._render(true);
-      }).catch((err) => { this._busy = false; this._error = (err && err.message) || "Couldn't save"; this._render(true); });
+      }).catch((err) => { this._busy = false; this._error = (err && err.message) || tr('schedule.not_saved'); this._render(true); });
     }
 
     _save(week) {
@@ -567,7 +588,7 @@
       const before = Object.fromEntries(targets.map((d) => [d, week[d]]));
       this._commit(week, days, () => {
         this._mode = 'edit';
-        this._undo = { text: `Copied ${LONG[from]} to ${listDays(targets)}`, before };
+        this._undo = { text: tr('schedule.copied', { day: LONG[from], days: listDays(targets) }), before };
         clearTimeout(this._undoTimer);
         this._undoTimer = setTimeout(() => { this._undo = null; this._render(true); }, UNDO_MS);
       });
@@ -590,8 +611,8 @@
       if (!this._day) this._day = DAYS[todayIdx()];
       const heat = this.kind === HEATING;
       let body;
-      if (this._err) body = `<div class="hint">${esc(this._config.entity)} isn't a Nest running Fledge.</div>`;
-      else if (!week) body = `<div class="hint">${this._ids ? 'No schedule from this Nest yet.' : 'Loading…'}</div>`;
+      if (this._err) body = `<div class="hint">${esc(tr('schedule.not_fledge', { entity: this._config.entity }))}</div>`;
+      else if (!week) body = `<div class="hint">${esc(tr(this._ids ? 'schedule.no_schedule' : 'common.loading'))}</div>`;
       else body = this._mode === 'copy' ? this._copyView(week) : this._editView(week);
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}${EDITOR_CSS}</style><ha-card${this._config.bare ? ' style="box-shadow:none;border:none;background:transparent;padding:0"' : ''}>${body}</ha-card>`;
       if (week) (this._mode === 'copy' ? this._bindCopy(week) : this._bindEdit(week, heat));
@@ -601,7 +622,7 @@
       const merged = this._merged(week);
       const bad = new Set(this._problems(week).map(([d]) => d));
       return `<div class="days" role="tablist">${DAYS.map((d) => `
-        <button class="dchip${d === this._day ? ' on' : ''}" data-day="${d}" role="tab" aria-selected="${d === this._day}" aria-label="${LONG[d]}${bad.has(d) ? ', needs fixing' : this._dirty(week, d) ? ', changed' : ''}">
+        <button class="dchip${d === this._day ? ' on' : ''}" data-day="${d}" role="tab" aria-selected="${d === this._day}" aria-label="${esc(bad.has(d) ? tr('schedule.day_bad', { day: LONG[d] }) : this._dirty(week, d) ? tr('schedule.day_changed', { day: LONG[d] }) : LONG[d])}">
           ${SHORT[d]}<span class="strip">${bars(this.kind, merged, d, { labels: false })}</span>${this._dirty(week, d) ? `<span class="dot${bad.has(d) ? ' bad' : ''}"></span>` : ''}
         </button>`).join('')}</div>`;
     }
@@ -609,14 +630,14 @@
     _footer(week, problem) {
       const changed = DAYS.filter((d) => this._dirty(week, d));
       const blocked = this._problems(week).length > 0;
-      const status = this._busy ? 'Saving…' : this._error ? esc(this._error) : this._pending().length ? 'Sending to the Nest…'
-        : this._saved && Date.now() - this._saved < 2000 ? 'Saved' : changed.length > 1 ? `${changed.length} days changed` : '';
-      const toast = this._undo ? `<div class="toast"><span>${esc(this._undo.text)}</span><button class="undo-copy">Undo</button></div>` : '';
+      const status = esc(this._busy ? tr('save.saving') : this._error ? this._error : this._pending().length ? tr('schedule.sending')
+        : this._saved && Date.now() - this._saved < 2000 ? tr('schedule.saved') : changed.length > 1 ? tr('schedule.days_changed', { count: changed.length }) : '');
+      const toast = this._undo ? `<div class="toast"><span>${esc(this._undo.text)}</span><button class="undo-copy">${esc(tr('schedule.undo'))}</button></div>` : '';
       return `<div class="foot">
-          <button class="btn to-copy"${this._busy || problem ? ' disabled' : ''}><ha-icon icon="${ICON.copy}"></ha-icon>Copy to…</button>
+          <button class="btn to-copy"${this._busy || problem ? ' disabled' : ''}><ha-icon icon="${ICON.copy}"></ha-icon>${esc(tr('schedule.copy_to'))}</button>
           <div class="status${this._error ? ' err' : ''}">${status}</div>
-          <button class="btn${changed.length ? ' primary' : ''} save"${changed.length && !this._busy && !blocked ? '' : ' disabled'}>${changed.length > 1 ? `Save ${changed.length} days` : 'Save'}</button>
-        </div>${changed.length ? '<button class="btn ghost wide undo-all" style="margin-top:6px;height:32px;font-size:13px">Discard changes</button>' : ''}${toast}`;
+          <button class="btn${changed.length ? ' primary' : ''} save"${changed.length && !this._busy && !blocked ? '' : ' disabled'}>${esc(changed.length > 1 ? tr('schedule.save_days', { count: changed.length }) : tr('save.save'))}</button>
+        </div>${changed.length ? `<button class="btn ghost wide undo-all" style="margin-top:6px;height:32px;font-size:13px">${esc(tr('schedule.discard'))}</button>` : ''}${toast}`;
     }
 
     _editView(week) {
@@ -636,29 +657,29 @@
         this._limits = { step, minT, maxT };
         rows = list.map((x, i) => `
           <div class="ev" data-i="${i}">
-            ${timeField('st', x.m, 'Time')}
+            ${timeField('st', x.m, tr('schedule.time'))}
             <span></span>
-            <div class="temp"><button class="rb dn" aria-label="Cooler"${x.t - step < minT ? ' disabled' : ''}><ha-icon icon="${ICON.minus}"></ha-icon></button>
+            <div class="temp"><button class="rb dn" aria-label="${esc(tr('schedule.cooler'))}"${x.t - step < minT ? ' disabled' : ''}><ha-icon icon="${ICON.minus}"></ha-icon></button>
               <span class="v">${fmtT(x.t)}</span>
-              <button class="rb up" aria-label="Warmer"${x.t + step > maxT ? ' disabled' : ''}><ha-icon icon="${ICON.plus}"></ha-icon></button></div>
-            <button class="del" aria-label="Remove"><ha-icon icon="${ICON.del}"></ha-icon></button>
+              <button class="rb up" aria-label="${esc(tr('schedule.warmer'))}"${x.t + step > maxT ? ' disabled' : ''}><ha-icon icon="${ICON.plus}"></ha-icon></button></div>
+            <button class="del" aria-label="${esc(tr('card.remove'))}"><ha-icon icon="${ICON.del}"></ha-icon></button>
           </div>`).join('');
       } else {
         rows = list.map((p, i) => `
           <div class="ev water" data-i="${i}">
-            <span class="lbl">From</span>${timeField('st', p.s, 'On at')}
-            <span class="lbl">to</span>${timeField('en', p.e % DAY_MIN, 'Off at')}
-            <span class="lbl">${p.e > DAY_MIN ? 'next day' : ''}</span>
-            <button class="del" aria-label="Remove"><ha-icon icon="${ICON.del}"></ha-icon></button>
+            <span class="lbl">${esc(tr('schedule.from'))}</span>${timeField('st', p.s, tr('schedule.on_at'))}
+            <span class="lbl">${esc(tr('schedule.to'))}</span>${timeField('en', p.e % DAY_MIN, tr('schedule.off_at'))}
+            <span class="lbl">${p.e > DAY_MIN ? esc(tr('schedule.next_day')) : ''}</span>
+            <button class="del" aria-label="${esc(tr('card.remove'))}"><ha-icon icon="${ICON.del}"></ha-icon></button>
           </div>`).join('');
       }
       const c = heat ? carry(merged, DAYS.indexOf(d)) : null;
-      const note = heat ? (c == null ? '' : `From midnight: ${fmtT(c)}`) : `${list.length || 'No'} time${list.length === 1 ? '' : 's'}`;
+      const note = heat ? (c == null ? '' : tr('schedule.from_midnight', { temperature: fmtT(c) })) : list.length ? tn('schedule.times', list.length) : tr('schedule.no_times');
       return `${this._chips(week)}
-        <div class="sub"><b>${LONG[d]}</b><span>${note}</span></div>
+        <div class="sub"><b>${esc(LONG[d])}</b><span>${esc(note)}</span></div>
         <div class="preview">${bars(this.kind, merged, d)}</div>${AXIS}
-        <div class="list">${rows || `<div class="hint">${heat ? 'No changes: it stays at the temperature from the day before.' : 'Off all day.'}</div>`}</div>
-        <button class="add"><ha-icon icon="${ICON.add}"></ha-icon>${heat ? 'Add a change' : 'Add hot water time'}</button>
+        <div class="list">${rows || `<div class="hint">${esc(tr(heat ? 'schedule.no_changes' : 'schedule.off_all_day_note'))}</div>`}</div>
+        <button class="add"><ha-icon icon="${ICON.add}"></ha-icon>${esc(tr(heat ? 'schedule.add_change' : 'schedule.add_time'))}</button>
         ${shown ? `<div class="problem">${esc(shown)}</div>` : ''}
         ${this._footer(week, problem)}`;
     }
@@ -724,28 +745,28 @@
       [...this._targets].forEach((d) => { if (!eligible.includes(d)) this._targets.delete(d); });
       const chosen = eligible.filter((d) => this._targets.has(d));
       const heat = this.kind === HEATING;
-      const what = heat ? `${source.length} change${source.length === 1 ? '' : 's'}` : `${source.length || 'no'} time${source.length === 1 ? '' : 's'}`;
-      const unsaved = this._dirty(week, from) ? ` Also saves ${LONG[from]}'s changes.` : '';
+      const what = heat ? tn('schedule.changes', source.length) : source.length ? tn('schedule.times_of', source.length) : tr('schedule.no_times_of');
+      const unsaved = this._dirty(week, from) ? ` ${tr('schedule.also_saves', { day: LONG[from] })}` : '';
       return `<div class="copy">
-          <div class="ct">Copy ${LONG[from]}'s ${heat ? 'heating' : 'hot water'}</div>
-          <div class="cs">The days you choose get ${SHORT[from]}'s ${what}, replacing what they have.${unsaved}</div>
-          <div class="quick">${QUICK.map(([n, ds]) => {
+          <div class="ct">${esc(tr(heat ? 'schedule.copy_heating' : 'schedule.copy_water', { day: LONG[from] }))}</div>
+          <div class="cs">${esc(tr('schedule.copy_about', { day: SHORT[from], what }) + unsaved)}</div>
+          <div class="quick">${QUICK.map(([key, ds]) => {
             const pick = ds.filter((d) => eligible.includes(d));
             const on = pick.length && same(chosen, pick);
-            return `<button class="chip${on ? ' on' : ''}" data-q="${n}"${pick.length ? '' : ' disabled'}>${n}</button>`;
+            return `<button class="chip${on ? ' on' : ''}" data-q="${key}"${pick.length ? '' : ' disabled'}>${esc(tr(key))}</button>`;
           }).join('')}</div>
           <div class="targets">${DAYS.filter((d) => d !== from).map((d) => {
             const ok = eligible.includes(d); const on = ok && this._targets.has(d);
             const shown = on ? { ...merged, [d]: source } : merged;
-            return `<button class="dt" data-day="${d}" aria-pressed="${on}"${ok ? '' : ' disabled'} aria-label="${LONG[d]}">
+            return `<button class="dt" data-day="${d}" aria-pressed="${on}"${ok ? '' : ' disabled'} aria-label="${esc(LONG[d])}">
               <span class="box">${on ? `<ha-icon icon="${ICON.check}"></ha-icon>` : ''}</span><span class="day">${SHORT[d]}</span>
               <span class="bar">${bars(this.kind, shown, d, { labels: false })}</span>
-              <span class="note">${ok ? (on ? 'Replace' : '') : 'Same'}</span></button>`;
+              <span class="note">${esc(ok ? (on ? tr('schedule.replace') : '') : tr('schedule.same'))}</span></button>`;
           }).join('')}</div>
           <div class="foot">
-            <button class="btn ghost cancel">Cancel</button>
-            <div class="status${this._error ? ' err' : ''}">${this._busy ? 'Copying…' : esc(this._error || '')}</div>
-            <button class="btn primary go"${chosen.length && !this._busy ? '' : ' disabled'}>${chosen.length ? `Copy to ${chosen.length} day${chosen.length > 1 ? 's' : ''}` : 'Choose days'}</button>
+            <button class="btn ghost cancel">${esc(tr('common.cancel'))}</button>
+            <div class="status${this._error ? ' err' : ''}">${esc(this._busy ? tr('schedule.copying') : this._error || '')}</div>
+            <button class="btn primary go"${chosen.length && !this._busy ? '' : ' disabled'}>${esc(chosen.length ? tn('schedule.copy_days', chosen.length) : tr('schedule.choose_days'))}</button>
           </div>
         </div>`;
     }
@@ -789,8 +810,8 @@
           @media (prefers-reduced-motion: reduce) { .scrim, .panel { animation: none; } }
         </style>
         <div class="scrim"></div>
-        <div class="panel" role="dialog" aria-modal="true" aria-label="${esc(opts.title)} schedule">
-          <div class="top"><h2>${esc(opts.title)}</h2><button class="x" aria-label="Close"><ha-icon icon="${ICON.close}"></ha-icon></button></div>
+        <div class="panel" role="dialog" aria-modal="true" aria-label="${esc(tr('schedule.dialog', { title: opts.title }))}">
+          <div class="top"><h2>${esc(opts.title)}</h2><button class="x" aria-label="${esc(tr('common.close'))}"><ha-icon icon="${ICON.close}"></ha-icon></button></div>
           <div class="body"></div>
         </div>`;
       const ed = document.createElement(opts.kind === HEATING ? 'fledge-heating-schedule-editor' : 'fledge-hot-water-schedule-editor');
@@ -820,9 +841,9 @@
 
   window.customCards = window.customCards || [];
   window.customCards.push(
-    { type: 'fledge-heating-schedule', name: 'Fledge heating schedule', description: "The Nest's own weekly heating schedule, with an editor and Copy to days.", preview: false },
-    { type: 'fledge-hot-water-schedule', name: 'Fledge hot water schedule', description: "The Nest's own weekly hot water schedule, with an editor and Copy to days.", preview: false },
-    { type: 'fledge-heating-schedule-editor', name: 'Fledge heating schedule editor', description: 'The heating schedule editor on its own, for a popup.', preview: false },
-    { type: 'fledge-hot-water-schedule-editor', name: 'Fledge hot water schedule editor', description: 'The hot water schedule editor on its own, for a popup.', preview: false },
+    { type: 'fledge-heating-schedule', name: tr('schedule.card_heating'), description: tr('schedule.card_heating_about'), preview: false },
+    { type: 'fledge-hot-water-schedule', name: tr('schedule.card_water'), description: tr('schedule.card_water_about'), preview: false },
+    { type: 'fledge-heating-schedule-editor', name: tr('schedule.card_heating_editor'), description: tr('schedule.card_heating_editor_about'), preview: false },
+    { type: 'fledge-hot-water-schedule-editor', name: tr('schedule.card_water_editor'), description: tr('schedule.card_water_editor_about'), preview: false },
   );
 })();

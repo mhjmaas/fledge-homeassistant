@@ -1,7 +1,12 @@
 // Fledge's panel in Home Assistant's sidebar: a thermostat's cards in the
 // ring's order, previewed as the Nest shows them, and its wake, glance and
 // notifications. Plain custom element, no build step; it talks to the
-// integration over the fledge/* websocket commands (panel.py).
+// integration over the fledge/* websocket commands (panel.py). Its words are
+// in the viewer's language (fledge-i18n.js); what the Nest's screen says is
+// nestlocal's own, as screen.* messages.
+
+// Imported with this module's version, as the panel itself is.
+const { t: tr, tn, has, use, languageOf, language } = await import(new URL(`./fledge-i18n.js${new URL(import.meta.url).search}`, import.meta.url));
 
 // Fledge's documentation, and the page for each of the panel's tabs.
 const DOCS = "https://sysmoon14.github.io/fledge/docs/";
@@ -13,68 +18,58 @@ const ICONS = {
   select: "mdi:format-list-bulleted", input_select: "mdi:format-list-bulleted", cover: "mdi:blinds",
   alarm_control_panel: "mdi:shield-home",
 };
+// Each kind of card's name, by domain (message IDs).
 const KINDS = {
-  light: "Light", switch: "Switch", fan: "Fan", input_boolean: "Toggle", climate: "Thermostat", media_player: "Speaker",
-  scene: "Scene", script: "Script", button: "Button", input_button: "Button", camera: "Camera", select: "Options",
-  input_select: "Options", cover: "Cover", alarm_control_panel: "Alarm",
+  light: "kind.light", switch: "kind.switch", fan: "kind.fan", input_boolean: "kind.toggle", climate: "kind.thermostat",
+  media_player: "kind.speaker", scene: "kind.scene", script: "kind.script", button: "kind.button", input_button: "kind.button",
+  camera: "kind.camera", select: "kind.options", input_select: "kind.options", cover: "kind.cover", alarm_control_panel: "kind.alarm",
 };
-// What the ring does on each kind of card.
+const kindName = (domain) => (KINDS[domain] ? tr(KINDS[domain]) : domain);
+// What the ring does on each kind of card: what you do, what it does (message IDs).
+const RUNS = [["ring.press", "ring.opens_run"], ["ring.hold_open", "ring.runs_it"]];
+const PRESSES = [["ring.press", "ring.opens_run"], ["ring.hold_open", "ring.presses_it"]];
+const SWITCHES = [["ring.hold", "ring.on_off"], ["ring.press", "ring.its_menu"]];
+const CHOOSES = [["ring.press", "ring.its_options"]];
 const RING = {
-  light: [["Turn", "Brightness"], ["Hold", "On / off"], ["Press", "Its menu: on / off, warmth and colour where it has them"]],
-  switch: [["Hold", "On / off"], ["Press", "Its menu"]], fan: [["Hold", "On / off"], ["Press", "Its menu"]], input_boolean: [["Hold", "On / off"], ["Press", "Its menu"]],
-  climate: [["Turn", "Target temperature"], ["Press", "Its menu: mode, and presets, fan and swing where it has them"]],
-  media_player: [["Turn", "Volume"], ["Hold", "Play / pause"], ["Press", "Its menu: play / pause, next and previous"], ["Behind the dial", "Album art"]],
-  scene: [["Press", "Opens it: press again for Run"], ["Hold, open", "Runs it"]], script: [["Press", "Opens it: press again for Run"], ["Hold, open", "Runs it"]],
-  button: [["Press", "Opens it: press again for Run"], ["Hold, open", "Presses it"]], input_button: [["Press", "Opens it: press again for Run"], ["Hold, open", "Presses it"]],
-  camera: [["Press", "Full screen"], ["Full screen", "A new picture every 3 s"]],
-  select: [["Press", "Its options: turn to one, press to choose it"]], input_select: [["Press", "Its options: turn to one, press to choose it"]],
-  cover: [["Turn", "Position"], ["Hold", "Open / close"], ["Press", "Its menu: open and close"]],
-  alarm_control_panel: [["Press", "Opens it: press again to arm or disarm"], ["Code", "Turn to each digit, press to enter it, hold to rub out"],
-    ["Entry delay", "Takes the screen, straight to the code"]],
+  light: [["ring.turn", "ring.brightness"], ["ring.hold", "ring.on_off"], ["ring.press", "ring.light_menu"]],
+  switch: SWITCHES, fan: SWITCHES, input_boolean: SWITCHES,
+  climate: [["ring.turn", "ring.target_temperature"], ["ring.press", "ring.climate_menu"]],
+  media_player: [["ring.turn", "ring.volume"], ["ring.hold", "ring.play_pause"], ["ring.press", "ring.media_menu"], ["ring.behind_dial", "ring.album_art"]],
+  scene: RUNS, script: RUNS, button: PRESSES, input_button: PRESSES,
+  camera: [["ring.press", "ring.full_screen"], ["ring.full_screen", "ring.new_picture"]],
+  select: CHOOSES, input_select: CHOOSES,
+  cover: [["ring.turn", "ring.position"], ["ring.hold", "ring.open_close"], ["ring.press", "ring.cover_menu"]],
+  alarm_control_panel: [["ring.press", "ring.alarm_press"], ["ring.code", "ring.alarm_code"], ["ring.entry_delay", "ring.alarm_entry"]],
 };
 // What a card's ring sets that can be limited, by domain (cards.py LIMITS):
-// key, label, unit, and its widest range from the entity (else fixed).
+// key, label (a message ID), unit, and its widest range from the entity (else fixed).
 const LIMITS = {
-  climate: [["temperature", "Temperature", "°", (a) => [a.min_temp ?? 7, a.max_temp ?? 30], 0.5]],
-  media_player: [["volume", "Volume", "%", () => [0, 100], 1]],
-  cover: [["position", "Position", "%", () => [0, 100], 1]],
-  light: [["brightness", "Brightness", "%", () => [1, 100], 1],
-    ["kelvin", "Warmth", "K", (a) => [a.min_color_temp_kelvin, a.max_color_temp_kelvin], 50]],
+  climate: [["temperature", "limit.temperature", "°", (a) => [a.min_temp ?? 7, a.max_temp ?? 30], 0.5]],
+  media_player: [["volume", "limit.volume", "%", () => [0, 100], 1]],
+  cover: [["position", "limit.position", "%", () => [0, 100], 1]],
+  light: [["brightness", "limit.brightness", "%", () => [1, 100], 1],
+    ["kelvin", "limit.warmth", "K", (a) => [a.min_color_temp_kelvin, a.max_color_temp_kelvin], 50]],
 };
-// An alarm's modes, in the ring's order, with Home Assistant's names (cards.py ALARM_MODES).
-const ALARM_MODES = [["home", "Home"], ["away", "Away"], ["night", "Night"], ["vacation", "Vacation"], ["custom_bypass", "Custom"]];
+// An alarm's modes, in the ring's order, with their names on the Nest (cards.py ALARM_MODES).
+const ALARM_MODES = ["home", "away", "night", "vacation", "custom_bypass"];
+const alarmModeName = (mode) => tr(`screen.alarm_mode.${mode}`);
 const ALARM_ICONS = { home: "mdi:shield-home", night: "mdi:shield-moon", vacation: "mdi:airplane", custom_bypass: "mdi:shield-star" };
 const ALARM_ARMED = [154, 134, 255];
 const ALARM_RED = [255, 59, 59];
-const THERMOSTAT_RING = [["Turn", "Target temperature"], ["Press", "Its dial; press again for eco, off and hot water"]];
-const WAKES = [
-  ["auto", "Automatic", "The speaker that's playing, else after sunset a light that's on, else the chooser"],
-  ["chooser", "Device chooser", "The thermostat among your cards, zoomed out"],
-  ["thermostat", "The thermostat", "As the Nest always did"],
-];
-// Someone across the room (the Nest's Farsight) and someone close (its
-// approach reading), as Fledge's options name them.
-const FARS = [
-  ["glance", "The glance", "What you chose on the Glance tab: the time, the weather and what's on, to start"],
-  ["wake", "What it wakes to", "As if the ring had turned"],
-  ["dark", "Nothing", "The screen stays dark"],
-];
-const NEARS = [
-  ["wake", "What it wakes to", "Without a touch"],
-  ["glance", "The glance", "The same as across the room"],
-  ["none", "Nothing more", "Only what across the room shows"],
-];
+const THERMOSTAT_RING = [["ring.turn", "ring.target_temperature"], ["ring.press", "ring.thermostat_press"]];
+// What the Nest wakes to, and what someone across the room (the Nest's
+// Farsight) and someone close (its approach reading) bring, as Fledge's
+// options name them: each a value and its message ID (and the ID's _sub).
+const WAKES = [["auto", "wake.auto"], ["chooser", "wake.chooser"], ["thermostat", "wake.thermostat"]];
+const FARS = [["glance", "far.glance"], ["wake", "far.wake"], ["dark", "far.dark"]];
+const NEARS = [["wake", "near.wake"], ["glance", "near.glance"], ["none", "near.none"]];
 const ACTIVE = ["on", "playing", "open", "heat", "cool", "heat_cool", "auto"];
 
 // The glance (glance.py): its layouts, the lines each has room for and
 // where (nestlocal's screens.rs slots: baseline, style, width), and what a
-// line can show.
-const GLANCE_LAYOUTS = [
-  ["clock", "Clock", "Time, date and lines"], ["temp", "Temperature", "The room, big"],
-  ["weather", "Weather", "Outside, big"], ["analog", "Analog", "A clock face"],
-  ["number", "Big number", "Any sensor"], ["agenda", "Up next", "Your next event"],
-  ["battery", "Battery", "A car, a home battery"],
-];
+// line can show (layout.<key> and its _sub name them).
+const GLANCE_LAYOUTS = ["clock", "temp", "weather", "analog", "number", "agenda", "battery"];
+const layoutName = (k) => tr(`layout.${GLANCE_LAYOUTS.includes(k) ? k : "clock"}`);
 const GLANCE_PLACES = {
   clock: [[290, "quiet", 380], [352, "main", 330], [404, "pill", 290]],
   temp: [[352, "main", 330], [402, "quiet", 300]],
@@ -89,38 +84,40 @@ const GLANCE_DEFAULTS = {
   analog: ["date"], number: ["time", "none"], agenda: ["weather"],
   battery: ["none"],
 };
+// What a line can show, in groups (source.<group> names the group, line.<key> each line).
 const GLANCE_SOURCES = [
-  ["On the Nest", [["date", "Date"], ["date_short", "Short date"], ["time", "Time"], ["inside", "Inside temperature and humidity"],
-    ["heating", "Heating and time to temperature"], ["whats_on", "What's on"], ["weather", "Weather now"]]],
-  ["From Home Assistant", [["forecast", "Today's high and low"], ["rain", "When rain arrives"], ["sun", "Sunrise or sunset"],
-    ["playing", "Now playing"], ["calendar", "Next calendar event"], ["people", "Who's home"], ["entity", "A sensor or other entity…"]]],
-  ["Advanced", [["template", "A template…"]]],
+  ["nest", ["date", "date_short", "time", "inside", "heating", "whats_on", "weather"]],
+  ["home_assistant", ["forecast", "rain", "sun", "playing", "calendar", "people", "entity"]],
+  ["advanced", ["template"]],
 ];
-// Words for each kind of line where the preview has none yet (the layouts' thumbnails).
+const lineName = (k) => tr(`line.${k}`);
+// Words for each kind of line where the preview has none yet (the layouts'
+// thumbnails): as the Nest or Home Assistant would put them, and an icon.
 const GLANCE_SAMPLES = {
-  date: ["Wednesday 11 November"], date_short: ["Wed 11 Nov"], time: ["14:05", "mdi:clock-outline"],
-  inside: ["Inside 20.5° · 48%", "mdi:thermometer"], heating: ["Heating to 21°", "mdi:fire"], whats_on: ["2 lights on"],
-  weather: ["9° · Partly cloudy", "mdi:weather-partly-cloudy"], forecast: ["High 12° · Low 5°", "mdi:thermometer"],
-  rain: ["Rain from 15:00", "mdi:weather-rainy"], sun: ["Sunset 16:21", "mdi:weather-sunset-down"],
-  playing: ["Dreams · Fleetwood Mac", "mdi:play"], calendar: ["16:30 Dentist", "mdi:calendar"],
-  people: ["Alex home", "mdi:account"], entity: ["Electricity 24.3 p/kWh", "mdi:flash"], template: ["Your words"],
+  date: () => [`${tr("screen.day.3")} 11 ${tr("screen.month.10")}`],
+  date_short: () => [`${tr("screen.day_short.3")} 11 ${tr("screen.month_short.10")}`],
+  time: () => ["14:05", "mdi:clock-outline"],
+  inside: () => [tr("sample.inside"), "mdi:thermometer"], heating: () => [tr("sample.heating"), "mdi:fire"],
+  whats_on: () => [tr("screen.whats_on.lights", { count: 2 })],
+  weather: () => [`9° · ${tr("screen.weather.partlycloudy")}`, "mdi:weather-partly-cloudy"],
+  forecast: () => [tr("sample.forecast"), "mdi:thermometer"], rain: () => [tr("sample.rain"), "mdi:weather-rainy"],
+  sun: () => [tr("sample.sun"), "mdi:weather-sunset-down"], playing: () => ["Dreams · Fleetwood Mac", "mdi:play"],
+  calendar: () => [`16:30 ${tr("sample.event")}`, "mdi:calendar"], people: () => [tr("sample.people"), "mdi:account"],
+  entity: () => [`${tr("sample.big_label")} 24.3 ${tr("sample.big_unit")}`, "mdi:flash"], template: () => [tr("sample.template")],
 };
-// What a line with nothing to say can show instead (glance.FALLBACKS).
-const GLANCE_FALLBACKS = [["none", "Nothing: the lines below move up"], ["date", "Date"], ["date_short", "Short date"], ["time", "Time"],
-  ["inside", "Inside temperature and humidity"], ["heating", "Heating and time to temperature"], ["whats_on", "What's on"],
-  ["weather", "Weather now"], ["forecast", "Today's high and low"], ["rain", "When rain arrives"], ["sun", "Sunrise or sunset"],
-  ["playing", "Now playing"], ["calendar", "Next calendar event"], ["people", "Who's home"]];
+// What a line with nothing to say can show instead (glance.FALLBACKS): "none" says line.none_instead.
+const GLANCE_FALLBACKS = ["none", "date", "date_short", "time", "inside", "heating", "whats_on", "weather", "forecast", "rain", "sun",
+  "playing", "calendar", "people"];
 // The lines that can have nothing to say.
 const GLANCE_CAN_BE_EMPTY = ["playing", "calendar", "entity", "template", "rain", "forecast", "weather", "sun", "people", "inside", "heating"];
-// When an entity's line shows (glance.WHENS).
-const GLANCE_WHENS = [["always", "Always"], ["on", "Only while it's on"], ["off", "Only while it's off"], ["is", "Only while it is…"],
-  ["is_not", "Only while it isn't…"], ["above", "Only above…"], ["below", "Only below…"]];
+// When an entity's line shows (glance.WHENS; when.<key> names each).
+const GLANCE_WHENS = ["always", "on", "off", "is", "is_not", "above", "below"];
 
 // Glance faces as cards (faces.py): their ids in the cards' order, what
-// they're called until named, their icons, and what their actions can be.
+// they're called until named (face.<layout>), their icons, and what their actions can be.
 const FACE = "fledge_face.";
 const isFace = (id) => typeof id === "string" && id.startsWith(FACE);
-const FACE_NAMES = { clock: "Clock", temp: "Temperature", weather: "Weather", analog: "Clock", number: "Number", agenda: "Up next", battery: "Battery" };
+const faceName = (layout) => tr(`face.${GLANCE_LAYOUTS.includes(layout) ? layout : "clock"}`);
 const FACE_ICONS = { clock: "mdi:clock-outline", temp: "mdi:thermometer", weather: "mdi:weather-partly-cloudy",
   analog: "mdi:clock-time-four-outline", number: "mdi:numeric", agenda: "mdi:calendar", battery: "mdi:battery" };
 const FACE_ACTIONS = "light,switch,fan,input_boolean,scene,script,button,input_button";
@@ -165,17 +162,16 @@ function languageName(language) {
 const GLANCE_ENTITIES = "sensor,binary_sensor,input_number,input_text,input_boolean,input_datetime,counter,number,select,input_select,person,device_tracker,climate,weather,sun,lock,cover,timer,alarm_control_panel";
 const GLANCE_QUIET = [196, 203, 211];
 const FLEDGE_ON = [255, 211, 154];
-const GLANCE_NIGHT = [["off", "Never: the same glance all day"], ["sun", "Sunset to sunrise"], ["hours", "Between set times"],
-  ["sensor", "When a sensor says so"]];
-const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// When night is (night.<key> names each).
+const GLANCE_NIGHT = ["off", "sun", "hours", "sensor"];
 const CONDITION_ICONS = {
   sunny: "weather-sunny", "clear-night": "weather-night", partlycloudy: "weather-partly-cloudy", rainy: "weather-rainy",
   pouring: "weather-pouring", snowy: "weather-snowy", "snowy-rainy": "weather-snowy", fog: "weather-fog", windy: "weather-windy",
   "windy-variant": "weather-windy", lightning: "weather-lightning", "lightning-rainy": "weather-lightning", hail: "weather-hail",
 };
-const CONDITION_NAMES = { partlycloudy: "Partly cloudy", "clear-night": "Clear", "snowy-rainy": "Sleet",
-  "lightning-rainy": "Thunderstorms", "windy-variant": "Windy", exceptional: "" };
+// A weather condition in words, as the Nest names it (screens::condition_label).
+const conditionName = (c) => (c === "exceptional" ? "" : has(`screen.weather.${c}`) ? tr(`screen.weather.${c}`)
+  : capitalise(String(c || "").replace(/-/g, " ")));
 
 // A layout's lines, as many as it has room for: as chosen, else its
 // defaults (the night's, only the first): glance.lines_for.
@@ -201,15 +197,23 @@ function glanceWhen(event, g, now) {
   const local = event.start + offset;
   const days = Math.floor(local / 86400) - Math.floor((now + offset) / 86400);
   const at = new Date(local * 1000);
-  const day = days <= 0 ? "today" : days === 1 ? "tomorrow" : days <= 6 ? DAY_NAMES[at.getUTCDay()] : `${DAY_NAMES[at.getUTCDay()].slice(0, 3)} ${at.getUTCDate()} ${MONTH_NAMES[at.getUTCMonth()]}`;
-  if (event.all_day) return `All day · ${day}`;
+  const day = days <= 0 ? tr("screen.event.today") : days === 1 ? tr("screen.event.tomorrow") : days <= 6 ? tr(`screen.day.${at.getUTCDay()}`)
+    : `${tr(`screen.day_short.${at.getUTCDay()}`)} ${at.getUTCDate()} ${tr(`screen.month_short.${at.getUTCMonth()}`)}`;
+  if (event.all_day) return tr("screen.event.all_day", { day });
   const time = glanceTime(Math.floor((local % 86400) / 60), g.clock?.hours === 12, true);
   const away = Math.ceil((event.start - now) / 60);
-  const soon = away <= 0 ? "now" : away < 60 ? `in ${away} min` : days === 0 ? `in ${Math.round(away / 60)} h` : day;
+  const soon = away <= 0 ? tr("screen.event.now") : away < 60 ? tr("screen.event.in_minutes", { minutes: away })
+    : days === 0 ? tr("screen.event.in_hours", { hours: Math.round(away / 60) }) : day;
   return `${time} · ${soon}`;
 }
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+// A message as HTML: its words escaped, each of `html`'s values put in as the HTML it is.
+const trHtml = (key, html) => {
+  const names = Object.keys(html);
+  const marked = esc(tr(key, Object.fromEntries(names.map((name, i) => [name, `\u0000${i}\u0000`]))));
+  return marked.replace(/\u0000(\d+)\u0000/g, (_, i) => html[names[i]]);
+};
 const domainOf = (id) => id.split(".")[0];
 
 // The Nest's screens as nestlocal draws them (fledge: crates/nestlocal/src/
@@ -525,11 +529,11 @@ const FACES = {
     f.icon(card.icon || "mdi:lightbulb-group", 240, 132, 72, accent);
     f.label(214, card.name, accent);
     if (!room) {
-      f.text(240, 320, "Off", 96);
-      f.line(366, `${lights.length} lights`, N.GREY);
+      f.text(240, 320, tr("screen.state.off"), 96);
+      f.line(366, tr("screen.lights.count", { count: lights.length }), N.GREY);
     } else {
       f.text(240, 322, String(on.length), 112);
-      f.line(366, `of ${lights.length} on · ${room[0]}%`, N.GREY);
+      f.line(366, tr("screen.lights.of_on", { count: lights.length, level: room[0] }), N.GREY);
     }
   },
   light(f, card, light) {
@@ -545,8 +549,8 @@ const FACES = {
     }
     f.icon(light.icon || card.icon || NEST_ICONS[domainOf(light.id || "")], 240, 98, 40, accent);
     f.label(150, light.name, accent);
-    if (!on || !light.dimmable) f.text(240, NUMBER - 8, on ? "On" : "Off", 96);
-    f.line(366, on ? "Hold to turn off" : "Hold to turn on", N.GREY);
+    if (!on || !light.dimmable) f.text(240, NUMBER - 8, tr(on ? "screen.state.on" : "screen.state.off"), 96);
+    f.line(366, tr(on ? "screen.hint.hold_turn_off" : "screen.hint.hold_turn_on"), N.GREY);
     if (light.dimmable && on) f.big(value, false, "%");
   },
   climate(f, card) {
@@ -554,9 +558,11 @@ const FACES = {
     f.face(bg);
     const target = card.target;
     f.label(150, card.name, active ? N.WHITE : N.GREY);
-    if (target == null || card.mode === "off") f.text(240, 300, "OFF", 96, { kind: "digits" });
-    const now = card.current != null ? `${card.current.toFixed(1)}° now` : "";
-    const state = card.action || String(card.mode || "").replace(/_/g, " ");
+    if (target == null || card.mode === "off") f.text(240, 300, tr("screen.state.off").toUpperCase(), 96, { kind: "digits" });
+    const now = card.current != null ? tr("preview.now", { temperature: `${card.current.toFixed(1)}°` }) : "";
+    const doing = card.action || card.mode;
+    const state = !doing ? "" : has(`preview.action.${doing}`) ? tr(`preview.action.${doing}`)
+      : has(`screen.climate.${doing}`) ? tr(`screen.climate.${doing}`) : String(doing).replace(/_/g, " ");
     f.line(366, [now, state].filter(Boolean).join(" · "), active ? N.SOFT : N.GREY);
     climateRing(f, card, target);
   },
@@ -604,14 +610,14 @@ const FACES = {
     f.ring(() => ({ c: N.DIM, shape: "short" }));
     f.icon(card.icon || "mdi:cctv", 240, 178, 96, N.WHITE);
     f.text(240, 286, card.name, 36, { max: 330 });
-    f.line(328, "Press for a picture", N.GREY);
+    f.line(328, tr("screen.camera.press_for_picture"), N.GREY);
   },
   options(f, card) {
     f.face(N.BLACK);
     f.icon(card.icon || "mdi:format-list-bulleted", 240, 150, 84, N.WHITE);
     f.label(232, card.name, N.GREY);
     f.text(240, 292, card.current ?? "—", 40, { max: 330 });
-    f.line(334, "Press to choose", N.GREY);
+    f.line(334, tr("screen.menu.choose"), N.GREY);
   },
   cover(f, card) {
     const open = card.state === "open" || card.state === "opening";
@@ -621,23 +627,23 @@ const FACES = {
     f.ring((i) => (i === top ? { c: N.WHITE, shape: "long" } : { c: i <= top && value > 0 ? N.COVER : N.DIM, shape: "short" }));
     f.icon(card.icon || (open ? "mdi:window-shutter-open" : "mdi:window-shutter"), 240, 98, 40, N.COVER);
     f.label(150, card.name, N.COVER);
-    if (!card.positionable) f.text(240, NUMBER - 12, capitalise(card.state), 80);
-    f.line(366, open ? "Hold to close" : "Hold to open", N.GREY);
+    if (!card.positionable) f.text(240, NUMBER - 12, has(`screen.cover_state.${card.state}`) ? tr(`screen.cover_state.${card.state}`) : capitalise(card.state), 80);
+    f.line(366, tr(open ? "screen.cover.hold_close" : "screen.cover.hold_open"), N.GREY);
     if (card.positionable) f.big(value, false, "%");
   },
   // screens.rs alarm_screen, as its card shows it among the others: its
   // state the large word in its colour, the whole ring lit the same.
   alarm(f, card) {
-    const name = card.name || "Alarm";
-    const modeName = (mode) => card.modes.find((m) => m.mode === mode)?.name || ALARM_MODES.find(([m]) => m === mode)?.[1] || mode;
+    const name = card.name || tr("screen.alarm.alarm");
+    const modeName = (mode) => card.modes.find((m) => m.mode === mode)?.name || (ALARM_MODES.includes(mode) ? alarmModeName(mode) : mode);
     const armed = card.state.startsWith("armed_") ? card.state.slice(6) : null;
-    const [accent, icon, word, under] = armed ? [ALARM_ARMED, ALARM_ICONS[armed] || "mdi:shield-lock", "Armed", modeName(armed)]
-      : card.state === "disarmed" ? [N.ECO, "mdi:shield-lock-open-outline", "Disarmed", ""]
-      : card.state === "arming" ? [N.AMBER, "mdi:home-export-outline", "Arming", "Leave now"]
-      : card.state === "pending" ? [N.AMBER, "mdi:door-open", "Entry delay", card.code === "number" ? "Enter the code" : ""]
-      : card.state === "triggered" ? [ALARM_RED, "mdi:alarm-light", "Alarm", card.sensors?.[0] || ""]
-      : card.state === "disarming" ? [N.AMBER, "mdi:shield-lock-open-outline", "Disarming", ""]
-      : [N.DIM, "mdi:shield-lock-open-outline", "Unavailable", ""];
+    const [accent, icon, word, under] = armed ? [ALARM_ARMED, ALARM_ICONS[armed] || "mdi:shield-lock", tr("screen.alarm.armed"), modeName(armed)]
+      : card.state === "disarmed" ? [N.ECO, "mdi:shield-lock-open-outline", tr("screen.alarm.disarmed"), ""]
+      : card.state === "arming" ? [N.AMBER, "mdi:home-export-outline", tr("screen.alarm.arming"), tr("screen.alarm.leave_now")]
+      : card.state === "pending" ? [N.AMBER, "mdi:door-open", tr("screen.alarm.entry_delay"), card.code === "number" ? tr("screen.alarm.enter_code") : ""]
+      : card.state === "triggered" ? [ALARM_RED, "mdi:alarm-light", tr("screen.alarm.alarm"), card.sensors?.[0] || ""]
+      : card.state === "disarming" ? [N.AMBER, "mdi:shield-lock-open-outline", tr("screen.alarm.disarming"), ""]
+      : [N.DIM, "mdi:shield-lock-open-outline", tr("screen.alarm.unavailable"), ""];
     const triggered = card.state === "triggered";
     f.face(f.fledge || triggered ? (sameRgb(accent, N.DIM) ? N.BLACK : accent) : N.BLACK);
     f.ring(() => ({ c: triggered && !f.fledge ? N.WHITE : accent, shape: "short" }));
@@ -656,19 +662,19 @@ const FACES = {
     const off = card.mode === "off";
     const target = off ? null : card.target;
     if (off) {
-      f.text(240, NUMBER - 18, "OFF", 96, { kind: "digits" });
+      f.text(240, NUMBER - 18, tr("screen.state.off").toUpperCase(), 96, { kind: "digits" });
     } else if (nest.eco) {
       f.icon("mdi:leaf", 240, 148, 40, active ? N.WHITE : N.ECO);
     } else {
-      const doing = card.action === "heating" ? "Heating" : card.action === "cooling" ? "Cooling" : "";
+      const doing = card.action === "heating" ? tr("screen.nest.heating") : card.action === "cooling" ? tr("screen.nest.cooling") : "";
       let above;
-      if (doing) above = f.fledge ? (nest.eta ? `${doing} · ${nest.eta}` : doing) : (nest.eta ? `In ${nest.eta}` : doing);
-      else above = card.mode === "cool" ? "Cool set to" : "Heat set to";
+      if (doing) above = f.fledge ? (nest.eta ? `${doing} · ${nest.eta}` : doing) : (nest.eta ? tr("screen.nest.eta", { time: nest.eta }) : doing);
+      else above = tr(card.mode === "cool" ? "screen.nest.cool_set_to" : "screen.nest.heat_set_to");
       const tint = !active ? N.GREY : !f.fledge ? N.WHITE : card.action === "cooling" ? [170, 205, 255] : [255, 201, 166];
       f.dialWords(161, above, tint, card.action === "heating" ? "mdi:fire" : card.action === "cooling" ? "mdi:snowflake" : null);
-      if (nest.next) f.dialWords(343, `Until ${nest.next}`, soft);
+      if (nest.next) f.dialWords(343, tr("screen.nest.until", { until: nest.next }), soft);
     }
-    if (!off && nest.boost) f.line(392, `Hot water boost · ${nest.boost} min`, soft);
+    if (!off && nest.boost) f.line(392, tr("screen.nest.hot_water_boost_for", { minutes: nest.boost }), soft);
     if (off) {
       climateRing(f, card, null);
       return;
@@ -676,7 +682,7 @@ const FACES = {
     if (nest.eco) {
       const now = card.current != null ? tickAt((card.current - card.min) / Math.max(card.max - card.min, 0.5)) : null;
       f.ring((i) => (i === now ? { c: active ? N.NOW : N.GREY, shape: "wide" } : { c: f.fledge || !active ? N.DIM : N.AMBER, shape: "short" }));
-      f.text(240, NUMBER - 8, f.fledge ? "Eco" : "ECO", 120, { kind: "digits" });
+      f.text(240, NUMBER - 8, f.fledge ? tr("screen.nest.eco") : tr("screen.nest.eco").toUpperCase(), 120, { kind: "digits" });
       return;
     }
     climateRing(f, card, target);
@@ -684,8 +690,8 @@ const FACES = {
   settings(f) {
     f.face(N.BLACK);
     f.icon("mdi:cog", 240, 168, 96, N.WHITE);
-    f.text(240, 278, "Settings", 40);
-    f.line(316, "Eco · Home/Away · Fledge", N.GREY);
+    f.text(240, 278, tr("screen.settings.title"), 40);
+    f.line(316, tr("screen.settings.summary"), N.GREY);
   },
   // Not a card on the Nest: Home Assistant doesn't know it.
   missing(f, name, why) {
@@ -736,7 +742,7 @@ function glanceFace(f, g, lines, nest, now) {
     const tail = half ? `<tspan font-family="${f.font("regular")}" font-weight="500" font-size="${r1(size * 0.2)}" letter-spacing="1" dx="10" fill="${css(GLANCE_QUIET)}">${half}</tspan>` : "";
     raw(240, 236, `${esc(time)}${tail}`, size, N.WHITE, { spacing: -3 });
   } else if (layout === "temp") {
-    f.text(240, 150, f.fledge ? "Inside" : "INSIDE", 22, { weight: 500, spacing: f.fledge ? 1 : 2, c: coloured ? [255, 232, 218] : GLANCE_QUIET });
+    f.text(240, 150, f.fledge ? tr("screen.glance.inside_label") : tr("screen.glance.inside_label").toUpperCase(), 22, { weight: 500, spacing: f.fledge ? 1 : 2, c: coloured ? [255, 232, 218] : GLANCE_QUIET });
     if (nest?.current != null) {
       const value = nest.fahrenheit ? Math.round(nest.current) : Math.round(nest.current * 2) / 2;
       f.big(value, !nest.fahrenheit, "");
@@ -745,11 +751,11 @@ function glanceFace(f, g, lines, nest, now) {
     const w = g.weather;
     if (w) {
       f.icon(`mdi:${CONDITION_ICONS[w.condition] || "weather-cloudy"}`, 240, 112, 64, N.WHITE);
-      f.text(240, 178, CONDITION_NAMES[w.condition] ?? capitalise(String(w.condition || "").replace(/-/g, " ")), 26, { c: GLANCE_QUIET, max: 300 });
+      f.text(240, 178, conditionName(w.condition), 26, { c: GLANCE_QUIET, max: 300 });
       const t = w.temperature == null ? "–" : `${Math.round(w.temperature)}°`;
       raw(240, 300, esc(t), sized(t, f.fledge ? 150 : 128, 400), N.WHITE, { weight: f.fledge ? 200 : 300, spacing: -3 });
     } else {
-      f.text(240, 178, "No weather chosen", 26, { c: GLANCE_QUIET });
+      f.text(240, 178, tr("screen.glance.no_weather"), 26, { c: GLANCE_QUIET });
       raw(240, 300, "–", f.fledge ? 150 : 128, N.WHITE);
     }
   } else if (layout === "analog") {
@@ -767,9 +773,9 @@ function glanceFace(f, g, lines, nest, now) {
     if (big.unit) f.text(240, 316, big.unit, 28, { c: FLEDGE_ON, max: 280 });
   } else if (layout === "battery") {
     if (!cell) {
-      label(150, "Battery");
+      label(150, tr("screen.glance.battery"));
       raw(240, NUMBER, "–", 170, N.WHITE);
-      f.text(240, 352, "No battery chosen", 26, { c: GLANCE_QUIET });
+      f.text(240, 352, tr("screen.glance.no_battery"), 26, { c: GLANCE_QUIET });
     } else {
       const ring = coloured ? N.WHITE : mood == null ? (f.fledge ? GLANCE_QUIET : N.WHITE) : BATTERY_RING[mood];
       const words = coloured || mood == null ? N.WHITE : BATTERY_WORDS[mood];
@@ -801,12 +807,12 @@ function glanceFace(f, g, lines, nest, now) {
     }
   } else if (layout === "agenda") {
     raw(240, 122, esc(glanceTime(minutes, twelve, ampm)), 56, N.WHITE, { spacing: -1 });
-    label(178, "Up next");
+    label(178, tr("screen.glance.up_next"));
     if (g.event?.title) {
       const title = g.event.title.trim();
       f.text(240, 250, title, Math.max(40, Math.min(64, 64 * 380 / Math.max(1, estimate(title, 64, 0)))), { weight: 500, max: 380 });
       f.text(240, 300, glanceWhen(g.event, g, now), 28, { c: FLEDGE_ON, max: 340 });
-    } else f.text(240, 250, "Nothing coming up", 40, { weight: 500 });
+    } else f.text(240, 250, tr("screen.glance.nothing_coming"), 40, { weight: 500 });
   }
   if (layout === "analog") {
     const h = (minutes % 720) / 60;
@@ -899,7 +905,7 @@ class FledgePanel extends HTMLElement {
     this._gpreview = null;
     // The face card being designed on the Glance tab (its id), else the glance.
     this._gface = null;
-    this._note = { title: "Washing's done", message: "The washing machine has finished.", camera: "", timeout: 30 };
+    this._note = { title: tr("notify.sample_title"), message: tr("notify.sample_message"), camera: "", timeout: 30 };
     this._seen = {};
     this._drag = null;
     this._pickers = !!customElements.get("ha-entity-picker");
@@ -918,6 +924,8 @@ class FledgePanel extends HTMLElement {
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
+    // The viewer's language, once its words have come.
+    if (languageOf(hass) !== language()) use(hass).then((changed) => { if (changed && this._thermostats) this._render(); });
     if (first) {
       this._loadPickers();
       this._load();
@@ -1160,7 +1168,7 @@ class FledgePanel extends HTMLElement {
         await this._hass.callWS({ type: "config/device_registry/update", device_id: t.device_id, name_by_user: name || null });
       }
       this._busy = false;
-      this._flash("Saved. The Nest has its new cards.", 3000);
+      this._flash(tr("save.done"), 3000);
       await this._load(true);
     } catch (err) {
       this._busy = false;
@@ -1175,13 +1183,13 @@ class FledgePanel extends HTMLElement {
     if (id === THERMO) return this._thermostatName();
     const mine = this._draft.names[id];
     if (mine && mine.trim()) return mine;
-    if (isFace(id)) return FACE_NAMES[this._draft.faces[id]?.layout] || "Glance";
+    if (isFace(id)) return this._draft.faces[id] ? faceName(this._draft.faces[id].layout) : tr("face.glance");
     return this._hass.states[id]?.attributes.friendly_name || id;
   }
 
   _thermostatName() {
     const t = this._current;
-    return this._draft.device_name.trim() || t.default_name || t.name || "This thermostat";
+    return this._draft.device_name.trim() || t.default_name || t.name || tr("panel.this_thermostat");
   }
 
   _icon(id) {
@@ -1222,7 +1230,8 @@ class FledgePanel extends HTMLElement {
     const at = ttt && Date.parse(ttt.state);
     if (at && at > now.getTime() && ["heating", "cooling"].includes(card.action)) {
       const minutes = Math.max(1, Math.ceil((at - now.getTime()) / 60000));
-      eta = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+      eta = minutes < 60 ? tr("screen.duration.minutes", { minutes }) : minutes % 60 ? tr("screen.duration.h_min", { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
+        : tr("screen.duration.h", { hours: minutes / 60 });
     }
     let next = null;
     const times = state("_heating_times")?.attributes[DAYS[now.getDay()]];
@@ -1231,8 +1240,8 @@ class FledgePanel extends HTMLElement {
       next = times.map((x) => x?.time).filter((x) => typeof x === "string" && x > clock).sort()[0] || null;
     }
     const boost = state("_hot_water_boost", "select")?.state;
-    // As the Nest names its own card: the name given here, else "Thermostat".
-    const named = { ...card, name: this._draft.device_name.trim() || "Thermostat" };
+    // As the Nest names its own card: the name given here, else its "Thermostat".
+    const named = { ...card, name: this._draft.device_name.trim() || tr("screen.nest.thermostat") };
     return { card: named, eco: climate?.attributes.preset_mode === "eco", eta, next, boost: /^\d+$/.test(boost || "") ? Number(boost) : null };
   }
 
@@ -1259,9 +1268,9 @@ class FledgePanel extends HTMLElement {
     const id = this._draft.order[sel];
     if (id === THERMO) {
       const nest = this._nest();
-      if (!this._thermoShown()) FACES.missing(f, this._thermostatName(), this._acting() ? "Hidden: not on the Nest" : "Not a thermostat: no card");
+      if (!this._thermoShown()) FACES.missing(f, this._thermostatName(), tr(this._acting() ? "preview.hidden" : "preview.not_thermostat"));
       else if (nest) FACES.nest(f, nest);
-      else FACES.missing(f, this._thermostatName(), "Not reporting");
+      else FACES.missing(f, this._thermostatName(), tr("preview.not_reporting"));
       return f.html();
     }
     const card = this._card(id);
@@ -1269,11 +1278,11 @@ class FledgePanel extends HTMLElement {
     if (isFace(id)) {
       // Drawn as the glance is, from what Home Assistant would send now.
       if (card?.glance) glanceFace(f, card.glance, (card.said || []).filter((l) => l.text), this._glanceNest(), Date.now() / 1000);
-      else FACES.missing(f, this._name(id), this._current.loaded ? "Drawing…" : "Fledge isn't running");
+      else FACES.missing(f, this._name(id), tr(this._current.loaded ? "preview.drawing" : "preview.not_running"));
       return f.html();
     }
-    if (!card) FACES.missing(f, this._name(id), "Not in Home Assistant, so not on the Nest");
-    else if (state?.state === "unavailable") FACES.missing(f, this._name(id), "Unavailable");
+    if (!card) FACES.missing(f, this._name(id), tr("preview.not_in_ha"));
+    else if (state?.state === "unavailable") FACES.missing(f, this._name(id), tr("preview.unavailable"));
     else {
       const playing = ["playing", "paused"].includes(state?.state);
       const art = card.kind === "camera" ? state?.attributes.entity_picture : card.kind === "media" && playing ? state?.attributes.entity_picture : null;
@@ -1289,9 +1298,9 @@ class FledgePanel extends HTMLElement {
     if (!this._hass || this._drag != null) return;
     const t = this._current;
     let body;
-    if (!this._thermostats) body = `<div class="empty">Loading…</div>`;
-    else if (!t) body = `<div class="empty"><h2>No thermostat yet</h2><p>Add the Fledge integration for your Nest first.</p>
-      <a class="btn solid" href="/config/integrations/integration/fledge" data-act="nav" data-href="/config/integrations/integration/fledge">Fledge integration</a></div>`;
+    if (!this._thermostats) body = `<div class="empty">${esc(tr("common.loading"))}</div>`;
+    else if (!t) body = `<div class="empty"><h2>${esc(tr("empty.title"))}</h2><p>${esc(tr("empty.text"))}</p>
+      <a class="btn solid" href="/config/integrations/integration/fledge" data-act="nav" data-href="/config/integrations/integration/fledge">${esc(tr("empty.button"))}</a></div>`;
     else body = this._tabs() + this._banner() + this._tabBody();
     const scroll = this.shadowRoot.querySelector(".content")?.scrollTop || 0;
     const focus = this._focusKey();
@@ -1334,7 +1343,7 @@ class FledgePanel extends HTMLElement {
     const ids = Object.keys(this._hass.states).filter((id) => domains.includes(domainOf(id))
       && (!deviceClass || this._hass.states[id].attributes.device_class === deviceClass)).sort();
     return `<div class="field"><label for="pick-${key}">${esc(label)}</label><select id="pick-${key}" class="pick wide" data-input="pick" data-key="${key}" ${disabled ? "disabled" : ""}>
-      <option value="">None</option>${ids.map((id) => `<option value="${esc(id)}" ${value === id ? "selected" : ""}>${esc(this._hass.states[id].attributes.friendly_name || id)}</option>`).join("")}</select></div>`;
+      <option value="">${esc(tr("common.none"))}</option>${ids.map((id) => `<option value="${esc(id)}" ${value === id ? "selected" : ""}>${esc(this._hass.states[id].attributes.friendly_name || id)}</option>`).join("")}</select></div>`;
   }
 
   _focusKey() {
@@ -1356,10 +1365,10 @@ class FledgePanel extends HTMLElement {
 
   _toolbar() {
     const t = this._current;
-    const menu = this._narrow ? `<button class="icon" data-act="menu" aria-label="Sidebar"><ha-icon icon="mdi:menu"></ha-icon></button>` : "";
+    const menu = this._narrow ? `<button class="icon" data-act="menu" aria-label="${esc(tr("toolbar.sidebar"))}"><ha-icon icon="mdi:menu"></ha-icon></button>` : "";
     let picker = "";
     if (this._thermostats?.length > 1) {
-      picker = `<label class="hidden" for="which">Thermostat</label><select id="which" class="pick" data-input="which">${this._thermostats
+      picker = `<label class="hidden" for="which">${esc(tr("kind.thermostat"))}</label><select id="which" class="pick" data-input="which">${this._thermostats
         .map((x, i) => `<option value="${i}" ${i === this._index ? "selected" : ""}>${esc(x.name || x.title)}</option>`).join("")}</select>`;
     } else if (t) picker = `<span class="muted">${esc(t.name || t.title)}</span>`;
     let status = "";
@@ -1367,17 +1376,17 @@ class FledgePanel extends HTMLElement {
       const climate = t.climate && this._hass.states[t.climate];
       const online = climate && climate.state !== "unavailable";
       const build = this._build(true);
-      status = `<span class="pill ${online ? "ok" : "bad"}"><span class="dotlet"></span>${online ? "Online" : "Offline"}${build ? ` · Fledge ${esc(build)}` : ""}</span>`;
+      status = `<span class="pill ${online ? "ok" : "bad"}"><span class="dotlet"></span>${esc(tr(online ? "toolbar.online" : "toolbar.offline"))}${build ? ` · Fledge ${esc(build)}` : ""}</span>`;
     }
-    const wake = t?.entities?.wake_screen ? `<button class="btn ghost" data-act="wakenow">Wake screen</button>` : "";
-    const help = `<a class="icon" href="${DOCS}${DOC_PAGES[this._tab] || "panel.html"}" target="_blank" rel="noopener" title="Documentation" aria-label="Documentation for this tab"><ha-icon icon="mdi:help-circle-outline"></ha-icon></a>`;
+    const wake = t?.entities?.wake_screen ? `<button class="btn ghost" data-act="wakenow">${esc(tr("toolbar.wake"))}</button>` : "";
+    const help = `<a class="icon" href="${DOCS}${DOC_PAGES[this._tab] || "panel.html"}" target="_blank" rel="noopener" title="${esc(tr("toolbar.docs"))}" aria-label="${esc(tr("toolbar.docs_tab"))}"><ha-icon icon="mdi:help-circle-outline"></ha-icon></a>`;
     return `<header class="toolbar">${menu}<h1>Fledge</h1>${picker}<span class="grow"></span>${status}${wake}${help}</header>`;
   }
 
   _tabs() {
-    const tabs = [["cards", "Cards"], ["wake", "Wake & presence"], ["glance", "Glance"], ["notify", "Notifications"], ["thermostat", "Thermostat"]];
-    return `<nav class="tabs" role="tablist">${tabs.map(([k, label]) =>
-      `<button role="tab" class="tab ${k === this._tab ? "on" : ""}" aria-selected="${k === this._tab}" data-act="tab" data-tab="${k}">${esc(label)}</button>`).join("")}</nav>`;
+    const tabs = ["cards", "wake", "glance", "notify", "thermostat"];
+    return `<nav class="tabs" role="tablist">${tabs.map((k) =>
+      `<button role="tab" class="tab ${k === this._tab ? "on" : ""}" aria-selected="${k === this._tab}" data-act="tab" data-tab="${k}">${esc(tr(`tab.${k}`))}</button>`).join("")}</nav>`;
   }
 
   _banner() {
@@ -1385,8 +1394,8 @@ class FledgePanel extends HTMLElement {
     const out = [];
     if (this._error) out.push(`<div class="banner bad">${esc(this._error)}</div>`);
     if (this._notice) out.push(`<div class="banner ok">${esc(this._notice)}</div>`);
-    if (!t.loaded) out.push(`<div class="banner bad">Fledge isn't running for this thermostat (its setup failed or it's disabled), so changes won't reach the Nest until it is.</div>`);
-    else if (t.protocol != null && t.protocol < t.needs) out.push(`<div class="banner warn">The Nest runs an older Fledge build than this integration needs: some cards may not work until it updates (Thermostat tab).</div>`);
+    if (!t.loaded) out.push(`<div class="banner bad">${esc(tr("banner.not_running"))}</div>`);
+    else if (t.protocol != null && t.protocol < t.needs) out.push(`<div class="banner warn">${esc(tr("banner.outdated"))}</div>`);
     return out.join("");
   }
 
@@ -1402,11 +1411,11 @@ class FledgePanel extends HTMLElement {
     const order = this._draft.order;
     const rows = order.map((id, i) => this._row(i, id)).join("");
     return `<div class="deck">
-      <section class="card list" aria-label="Cards in ring order">
-        <div class="head"><h2>Ring order</h2><span class="muted small">${order.length} cards · drag to reorder</span></div>
+      <section class="card list" aria-label="${esc(tr("cards.aria"))}">
+        <div class="head"><h2>${esc(tr("cards.ring_order"))}</h2><span class="muted small">${esc(tn("cards.count", order.length))}</span></div>
         <div class="rows">${rows}</div>
-        <button class="add" data-act="add"><ha-icon icon="mdi:plus"></ha-icon>Add a card</button>
-        <p class="muted small foot"><ha-icon icon="mdi:cog"></ha-icon>Settings always comes last on the Nest.</p>
+        <button class="add" data-act="add"><ha-icon icon="mdi:plus"></ha-icon>${esc(tr("cards.add"))}</button>
+        <p class="muted small foot"><ha-icon icon="mdi:cog"></ha-icon>${esc(tr("cards.settings_last"))}</p>
       </section>
       ${this._previewSection()}
       ${this._detail()}
@@ -1421,15 +1430,16 @@ class FledgePanel extends HTMLElement {
     const active = state && ACTIVE.includes(state.state);
     const missing = !mine && !face && !state;
     const unavailable = state?.state === "unavailable";
-    const badge = missing ? `<span class="chip bad">Not found</span>` : unavailable ? `<span class="chip">Unavailable</span>`
-      : mine && !this._acting() ? `<span class="chip warm">Not a thermostat</span>`
-      : mine && !this._draft.show_thermostat ? `<span class="chip">Hidden</span>`
-      : mine ? `<span class="chip">This Nest</span>` : this._draft.wake_device === id ? `<span class="chip warm">Wakes here</span>` : "";
+    const chip = (key, kind = "") => `<span class="chip ${kind}">${esc(tr(key))}</span>`;
+    const badge = missing ? chip("row.not_found", "bad") : unavailable ? chip("row.unavailable")
+      : mine && !this._acting() ? chip("row.not_thermostat", "warm")
+      : mine && !this._draft.show_thermostat ? chip("row.hidden")
+      : mine ? chip("row.this_nest") : this._draft.wake_device === id ? chip("row.wakes_here", "warm") : "";
     return `<div class="row ${i === this._sel ? "sel" : ""} ${mine && !this._thermoShown() ? "off" : ""}" data-row="${i}" draggable="true">
       <span class="grip" aria-hidden="true"><ha-icon icon="mdi:drag-vertical"></ha-icon></span>
       <button class="pickrow" data-act="select" data-i="${i}" aria-label="${esc(this._name(id))}" aria-current="${i === this._sel}">
         <span class="ico ${active ? "active" : ""}"><ha-icon icon="${esc(this._icon(id))}"></ha-icon></span>
-        <span class="text"><span class="name">${esc(this._name(id))}</span><span class="sub">${esc(mine ? "Thermostat" : face ? this._faceSaid(id) : id)}</span></span>
+        <span class="text"><span class="name">${esc(this._name(id))}</span><span class="sub">${esc(mine ? tr("kind.thermostat") : face ? this._faceSaid(id) : id)}</span></span>
         ${badge}
       </button>
     </div>`;
@@ -1438,25 +1448,25 @@ class FledgePanel extends HTMLElement {
   _previewSection() {
     const total = this._draft.order.length;
     const dots = total <= 16 ? Array.from({ length: total }, (_, i) => `<span class="dot ${i === this._sel ? "on" : ""}"></span>`).join("")
-      : `<span class="muted small">${this._sel + 1} of ${total}</span>`;
-    const look = (k, label) => `<button class="seg ${this._look === k ? "on" : ""}" data-act="look" data-look="${k}" aria-pressed="${this._look === k}">${label}</button>`;
-    return `<section class="stage" aria-label="As the Nest shows it">
-      <span class="muted caps">On the Nest</span>
+      : `<span class="muted small">${esc(tr("preview.position", { at: this._sel + 1, total }))}</span>`;
+    const look = (k, label) => `<button class="seg ${this._look === k ? "on" : ""}" data-act="look" data-look="${k}" aria-pressed="${this._look === k}">${esc(label)}</button>`;
+    return `<section class="stage" aria-label="${esc(tr("preview.aria"))}">
+      <span class="muted caps">${esc(tr("preview.on_nest"))}</span>
       <div class="bezel"><div class="screen">${this._screen(this._sel)}</div></div>
       <div class="dots">${dots}</div>
       <div class="ring">
-        <button class="ringbtn" data-act="turn" data-by="-1" aria-label="Turn the ring left"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-        <span class="muted small center">Turn the ring to try your order</span>
-        <button class="ringbtn" data-act="turn" data-by="1" aria-label="Turn the ring right"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+        <button class="ringbtn" data-act="turn" data-by="-1" aria-label="${esc(tr("preview.left"))}"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+        <span class="muted small center">${esc(tr("preview.try"))}</span>
+        <button class="ringbtn" data-act="turn" data-by="1" aria-label="${esc(tr("preview.right"))}"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
       </div>
-      <div class="segs" role="group" aria-label="The Nest's look">${look("nest", "Nest look")}${look("fledge", "Fledge look")}</div>
+      <div class="segs" role="group" aria-label="${esc(tr("preview.looks"))}">${look("nest", tr("preview.nest_look"))}${look("fledge", tr("preview.fledge_look"))}</div>
     </section>`;
   }
 
   _moves() {
     const i = this._sel;
-    return `<button class="btn ghost" data-act="move" data-by="-1" ${i === 0 ? "disabled" : ""} aria-label="Move up"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
-      <button class="btn ghost" data-act="move" data-by="1" ${i === this._draft.order.length - 1 ? "disabled" : ""} aria-label="Move down"><ha-icon icon="mdi:arrow-down"></ha-icon></button>`;
+    return `<button class="btn ghost" data-act="move" data-by="-1" ${i === 0 ? "disabled" : ""} aria-label="${esc(tr("card.move_up"))}"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+      <button class="btn ghost" data-act="move" data-by="1" ${i === this._draft.order.length - 1 ? "disabled" : ""} aria-label="${esc(tr("card.move_down"))}"><ha-icon icon="mdi:arrow-down"></ha-icon></button>`;
   }
 
   _detail() {
@@ -1464,47 +1474,51 @@ class FledgePanel extends HTMLElement {
     const id = this._draft.order[this._sel];
     if (id === THERMO) {
       const old = t.protocol != null && t.protocol < ANYWHERE && this._place() > 0;
-      return `<section class="card detail" aria-label="Selected card">
+      return `<section class="card detail" aria-label="${esc(tr("card.aria"))}">
         <div class="who"><span class="ico big active"><ha-icon icon="mdi:thermostat"></ha-icon></span>
-          <span class="text"><span class="name big">${esc(this._thermostatName())}</span><span class="sub">This Nest's own card</span></span></div>
+          <span class="text"><span class="name big">${esc(this._thermostatName())}</span><span class="sub">${esc(tr("card.own"))}</span></span></div>
         ${this._acting()
-          ? `<div class="kv"><span>Show on the Nest<span class="sub">${this._draft.show_thermostat ? "Turn it to set the temperature, as the Nest always did" : "Hidden: the Nest still heats, set from Home Assistant"}</span></span>${this._switch("showthermo", this._draft.show_thermostat, "Show on the Nest")}</div>`
-          : `<div class="banner warn inline">This Nest isn't acting as a thermostat, so it has no card of its own. Turn it back on in the Thermostat tab.</div>`}
+          ? `<div class="kv"><span>${esc(tr("card.show"))}<span class="sub">${esc(tr(this._draft.show_thermostat ? "card.show_on" : "card.show_off"))}</span></span>${this._switch("showthermo", this._draft.show_thermostat, tr("card.show"))}</div>`
+          : `<div class="banner warn inline">${esc(tr("card.not_acting"))}</div>`}
         ${this._nameField("cardname")}
-        ${this._acting() ? `<div><div class="muted small">On the ring</div>
-          ${THERMOSTAT_RING.map(([k, v]) => `<div class="kv"><span class="muted">${esc(k)}</span><span>${esc(v)}</span></div>`).join("")}</div>` : ""}
+        ${this._acting() ? this._ringHelp(THERMOSTAT_RING) : ""}
         ${this._acting() ? this._limitSettings(OWN_LIMITS, "climate", this._ownRange()) : ""}
-        ${old ? `<div class="banner warn inline">The Nest's Fledge build keeps it first until it updates (Thermostat tab).</div>` : ""}
+        ${old ? `<div class="banner warn inline">${esc(tr("card.kept_first"))}</div>` : ""}
         <div class="actions">${this._moves()}
-          ${t.climate ? `<button class="btn ghost" data-act="more" data-id="${esc(t.climate)}">Open</button>` : ""}</div>
+          ${t.climate ? `<button class="btn ghost" data-act="more" data-id="${esc(t.climate)}">${esc(tr("card.open"))}</button>` : ""}</div>
       </section>`;
     }
     if (isFace(id)) return this._faceDetail(id);
     const domain = domainOf(id);
     const friendly = this._hass.states[id]?.attributes.friendly_name || id;
     const wakes = this._draft.wake_device === id;
-    return `<section class="card detail" aria-label="Selected card">
+    return `<section class="card detail" aria-label="${esc(tr("card.aria"))}">
       <div class="who"><span class="ico big"><ha-icon icon="${esc(this._icon(id))}"></ha-icon></span>
-        <span class="text"><span class="name big">${esc(this._name(id))}</span><span class="sub">${esc(KINDS[domain] || domain)} · ${esc(id)}</span></span></div>
-      <div class="field"><label for="cardname">Name on the Nest</label>
+        <span class="text"><span class="name big">${esc(this._name(id))}</span><span class="sub">${esc(kindName(domain))} · ${esc(id)}</span></span></div>
+      <div class="field"><label for="cardname">${esc(tr("card.name"))}</label>
         <input id="cardname" type="text" maxlength="40" placeholder="${esc(friendly)}" value="${esc(this._draft.names[id] || "")}" data-input="name"></div>
-      <div><div class="muted small">On the ring</div>
-        ${(RING[domain] || []).map(([k, v]) => `<div class="kv"><span class="muted">${esc(k)}</span><span>${esc(v)}</span></div>`).join("")}</div>
+      ${this._ringHelp(RING[domain] || [])}
       ${domain === "alarm_control_panel" ? this._alarmSettings(id) : ""}
       ${this._limitSettings(id, domain)}
-      <div class="kv"><span>Wake straight to this card</span>${this._switch("wakehere", wakes, "Wake straight to this card")}</div>
+      <div class="kv"><span>${esc(tr("card.wake_here"))}</span>${this._switch("wakehere", wakes, tr("card.wake_here"))}</div>
       <div class="actions">${this._moves()}
-        <button class="btn ghost" data-act="more" data-id="${esc(id)}">Open</button>
+        <button class="btn ghost" data-act="more" data-id="${esc(id)}">${esc(tr("card.open"))}</button>
         <span class="grow"></span>
-        <button class="btn text bad" data-act="remove">Remove</button>
+        <button class="btn text bad" data-act="remove">${esc(tr("card.remove"))}</button>
       </div>
     </section>`;
+  }
+
+  // What the ring does on a card: each [what you do, what it does], as message IDs.
+  _ringHelp(rows) {
+    return `<div><div class="muted small">${esc(tr("card.on_ring"))}</div>
+      ${rows.map(([k, v]) => `<div class="kv"><span class="muted">${esc(tr(k))}</span><span>${esc(tr(v))}</span></div>`).join("")}</div>`;
   }
 
   // A face card's kind and layout, as its row says.
   _faceSaid(id) {
     const layout = this._draft.faces[id]?.layout || "clock";
-    return `Glance face · ${GLANCE_LAYOUTS.find(([k]) => k === layout)?.[1] || "Clock"}`;
+    return tr("face.said", { layout: layoutName(layout) });
   }
 
   // A glance face's card: its name, its face (designed on the Glance tab),
@@ -1517,48 +1531,48 @@ class FledgePanel extends HTMLElement {
     const wakes = d.wake_device === id;
     const named = (e) => this._hass.states[e]?.attributes.friendly_name || e;
     // What doing it says: "Runs Movie Night", "Turns Hall Light on or off".
-    const does = (e, what) => (["scene", "script"].includes(domainOf(e)) ? `Runs ${what}`
-      : ["button", "input_button"].includes(domainOf(e)) ? `Presses ${what}` : `Turns ${what} on or off`);
+    const does = (e, what) => tr(["scene", "script"].includes(domainOf(e)) ? "face.runs"
+      : ["button", "input_button"].includes(domainOf(e)) ? "face.presses" : "face.turns", { what });
     const lines = glanceLines(face.lines || {}, face.layout || "clock", false).map((l) => l.source)
-      .filter((s) => s !== "none").map((s) => GLANCE_SOURCES.flatMap(([, items]) => items).find(([k]) => k === s)?.[1] || s);
+      .filter((s) => s !== "none").map((s) => (has(`line.${s}`) ? lineName(s) : s));
     const rows = actions.map((e, i) => `<div class="actrow">
         <span class="text"><span class="name">${esc(named(e))}</span><span class="sub">${esc(does(e, e))}</span></span>
-        ${e === hold ? `<span class="chip warm">Also on hold</span>` : ""}
-        <button class="icon" data-act="faceactmove" data-i="${i}" data-by="-1" ${i === 0 ? "disabled" : ""} aria-label="Move ${esc(named(e))} earlier"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
-        <button class="icon" data-act="faceactmove" data-i="${i}" data-by="1" ${i === actions.length - 1 ? "disabled" : ""} aria-label="Move ${esc(named(e))} later"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
-        <button class="icon" data-act="faceactremove" data-i="${i}" aria-label="Remove ${esc(named(e))}"><ha-icon icon="mdi:close"></ha-icon></button>
+        ${e === hold ? `<span class="chip warm">${esc(tr("face.also_hold"))}</span>` : ""}
+        <button class="icon" data-act="faceactmove" data-i="${i}" data-by="-1" ${i === 0 ? "disabled" : ""} aria-label="${esc(tr("face.earlier", { name: named(e) }))}"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+        <button class="icon" data-act="faceactmove" data-i="${i}" data-by="1" ${i === actions.length - 1 ? "disabled" : ""} aria-label="${esc(tr("face.later", { name: named(e) }))}"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+        <button class="icon" data-act="faceactremove" data-i="${i}" aria-label="${esc(tr("face.remove_action", { name: named(e) }))}"><ha-icon icon="mdi:close"></ha-icon></button>
       </div>`).join("");
-    const holdOptions = [["", "Nothing"], ...actions.map((e) => [e, named(e)])];
+    const holdOptions = [["", tr("common.nothing")], ...actions.map((e) => [e, named(e)])];
     const old = this._current.protocol != null && this._current.protocol < FACES_PROTOCOL;
-    return `<section class="card detail" aria-label="Selected card">
+    return `<section class="card detail" aria-label="${esc(tr("card.aria"))}">
       <div class="who"><span class="ico big"><ha-icon icon="${esc(this._icon(id))}"></ha-icon></span>
-        <span class="text"><span class="name big">${esc(this._name(id))}</span><span class="sub">Glance face · nothing to control</span></span></div>
-      ${old ? `<div class="banner warn inline">The Nest's Fledge build is older than face cards: it leaves this card out until it updates (Thermostat tab).</div>` : ""}
-      <div class="field"><label for="cardname">Name on the Nest</label>
-        <input id="cardname" type="text" maxlength="40" placeholder="${esc(FACE_NAMES[face.layout] || "Clock")}" value="${esc(d.names[id] || "")}" data-input="name"></div>
+        <span class="text"><span class="name big">${esc(this._name(id))}</span><span class="sub">${esc(tr("face.sub"))}</span></span></div>
+      ${old ? `<div class="banner warn inline">${esc(tr("face.outdated_card"))}</div>` : ""}
+      <div class="field"><label for="cardname">${esc(tr("card.name"))}</label>
+        <input id="cardname" type="text" maxlength="40" placeholder="${esc(faceName(face.layout))}" value="${esc(d.names[id] || "")}" data-input="name"></div>
       <div class="group">
-        <div class="muted small">Its face</div>
+        <div class="muted small">${esc(tr("face.its_face"))}</div>
         <div class="facerow"><span class="thumb"><span class="screen">${this._glanceThumb(face.layout || "clock", false, face)}</span></span>
-          <span class="text"><span class="name">${esc(GLANCE_LAYOUTS.find(([k]) => k === (face.layout || "clock"))?.[1] || "Clock")}</span>
-            <span class="sub wrap">${esc(lines.join(", ") || "No lines")}</span>
-            <span><button class="btn ghost" data-act="faceedit">Design its face</button></span></span></div>
+          <span class="text"><span class="name">${esc(layoutName(face.layout || "clock"))}</span>
+            <span class="sub wrap">${esc(lines.join(", ") || tr("face.no_lines"))}</span>
+            <span><button class="btn ghost" data-act="faceedit">${esc(tr("face.design"))}</button></span></span></div>
       </div>
-      <div><div class="muted small">On the ring</div>
-        <div class="kv"><span class="muted">Press</span><span>${actions.length ? "Opens it full screen; press again for its actions" : "Opens it full screen; press again to go back"}</span></div>
-        <div class="kv"><span class="muted">Hold, open</span><span>${hold ? esc(does(hold, named(hold))) : "Nothing"}</span></div>
-        <div class="kv"><span class="muted">Turn</span><span>Nothing, once it's open</span></div></div>
+      <div><div class="muted small">${esc(tr("card.on_ring"))}</div>
+        <div class="kv"><span class="muted">${esc(tr("ring.press"))}</span><span>${esc(tr(actions.length ? "face.press_actions" : "face.press_back"))}</span></div>
+        <div class="kv"><span class="muted">${esc(tr("ring.hold_open"))}</span><span>${esc(hold ? does(hold, named(hold)) : tr("common.nothing"))}</span></div>
+        <div class="kv"><span class="muted">${esc(tr("ring.turn"))}</span><span>${esc(tr("face.turn_nothing"))}</span></div></div>
       <div class="group">
-        <div class="head2"><span class="muted small">Actions on the ring</span><span class="muted small">${actions.length} of ${FACE_MAX_ACTIONS} · after Back</span></div>
-        ${rows || `<p class="muted small">None yet: a scene, script or button to run, or a light or switch to turn on and off.</p>`}
-        ${actions.length < FACE_MAX_ACTIONS ? this._entityField("faceact", FACE_ACTIONS, "Add an action", "") : ""}
-        <div class="field"><label for="facehold">A long press, with the card open</label>
+        <div class="head2"><span class="muted small">${esc(tr("face.actions"))}</span><span class="muted small">${esc(tr("face.action_count", { count: actions.length, max: FACE_MAX_ACTIONS }))}</span></div>
+        ${rows || `<p class="muted small">${esc(tr("face.no_actions"))}</p>`}
+        ${actions.length < FACE_MAX_ACTIONS ? this._entityField("faceact", FACE_ACTIONS, tr("face.add_action"), "") : ""}
+        <div class="field"><label for="facehold">${esc(tr("face.hold"))}</label>
           <select id="facehold" class="pick wide" data-input="facehold" ${actions.length ? "" : "disabled"}>${holdOptions.map(([v, l]) =>
             `<option value="${esc(v)}" ${v === hold ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
-        <p class="muted small">Only an action that's on the ring, so a hold never does something the ring doesn't show.</p>
+        <p class="muted small">${esc(tr("face.hold_note"))}</p>
       </div>
-      <div class="kv"><span>Wake straight to this card</span>${this._switch("wakehere", wakes, "Wake straight to this card")}</div>
+      <div class="kv"><span>${esc(tr("card.wake_here"))}</span>${this._switch("wakehere", wakes, tr("card.wake_here"))}</div>
       <div class="actions">${this._moves()}<span class="grow"></span>
-        <button class="btn text bad" data-act="remove">Remove</button></div>
+        <button class="btn text bad" data-act="remove">${esc(tr("card.remove"))}</button></div>
     </section>`;
   }
 
@@ -1570,7 +1584,8 @@ class FledgePanel extends HTMLElement {
       .filter(([what]) => domain !== "cover" || this._preview.cards[id]?.positionable);
     if (!kinds.length) return "";
     const limits = this._draft.limits[id] || {};
-    const rows = kinds.map(([what, label, unit, range, step]) => {
+    const rows = kinds.map(([what, labelKey, unit, range, step]) => {
+      const label = tr(labelKey);
       const [low, high] = range(a);
       const [lo, hi] = limits[what] || [null, null];
       const wrong = lo != null && hi != null && lo >= hi;
@@ -1579,19 +1594,19 @@ class FledgePanel extends HTMLElement {
       const field = (end, value, word, fallback) => `<div class="field"><label for="limit-${what}-${end}">${esc(word)}</label>
         <input id="limit-${what}-${end}" type="number" inputmode="decimal" min="${low}" max="${high}" step="${step}"
           placeholder="${esc(`${fallback}${unit}`)}" value="${value ?? ""}" data-input="limit" data-what="${what}" data-end="${end}"
-          aria-label="${esc(`${label}: ${word.toLowerCase()}`)}">
-        ${value != null ? `<div class="kv flat"><span class="small">Can be pushed past${old && push[end] ? `<span class="sub">Needs a newer Fledge on the Nest</span>` : ""}</span>
-          <button class="switch ${push[end] ? "on" : ""}" role="switch" aria-checked="${!!push[end]}" aria-label="${esc(`${label}: ${word.toLowerCase()} can be pushed past`)}"
+          aria-label="${esc(tr("limit.end_aria", { label, end: word.toLowerCase() }))}">
+        ${value != null ? `<div class="kv flat"><span class="small">${esc(tr("limit.push"))}${old && push[end] ? `<span class="sub">${esc(tr("limit.push_newer"))}</span>` : ""}</span>
+          <button class="switch ${push[end] ? "on" : ""}" role="switch" aria-checked="${!!push[end]}" aria-label="${esc(tr("limit.push_aria", { label, end: word.toLowerCase() }))}"
             data-act="limitpush" data-what="${what}" data-end="${end}"><span class="knob"></span></button></div>` : ""}</div>`;
       return `<div class="muted small">${esc(label)}</div>
-        <div class="split">${field(0, lo, "Lowest", low)}${field(1, hi, "Highest", high)}</div>
-        ${wrong ? `<div class="banner warn inline">The lowest has to be under the highest, or this limit is ignored.</div>` : ""}`;
+        <div class="split">${field(0, lo, tr("limit.lowest"), low)}${field(1, hi, tr("limit.highest"), high)}</div>
+        ${wrong ? `<div class="banner warn inline">${esc(tr("limit.wrong"))}</div>` : ""}`;
     }).join("");
     return `<div class="group">
-        <div class="muted small">Ring limits</div>
-        <p class="muted small">The ring's ends: a full ring is the highest, an empty one the lowest, and the Nest says when it's at one. Blank, as far as it goes. A limit that can be pushed past gives way if you keep turning; one that can't holds. Home Assistant can still set it anywhere.${id === OWN_LIMITS ? " The Nest's own dial (Settings on the Nest) and its schedule aren't held to them." : ""}</p>
+        <div class="muted small">${esc(tr("limit.title"))}</div>
+        <p class="muted small">${esc(tr("limit.about"))}${id === OWN_LIMITS ? ` ${esc(tr("limit.own_note"))}` : ""}</p>
         ${id === OWN_LIMITS && limits.temperature && this._current.protocol != null && this._current.protocol < OWN_LIMITS_PROTOCOL
-          ? `<div class="banner warn inline">The Nest's Fledge build is older than limits on its own card: it turns as far as it goes until it updates (Thermostat tab).</div>` : ""}
+          ? `<div class="banner warn inline">${esc(tr("limit.own_outdated"))}</div>` : ""}
         ${rows}
       </div>`;
   }
@@ -1604,39 +1619,38 @@ class FledgePanel extends HTMLElement {
     const a = state?.attributes || {};
     const settings = this._draft.alarms[id] || {};
     const hidden = settings.hidden || [];
-    const has = ALARM_MODES.filter(([mode]) => this._preview.cards[id]?.modes?.some((m) => m.mode === mode));
-    const missing = ALARM_MODES.filter(([mode]) => !has.some(([m]) => m === mode)).map(([, name]) => name);
+    const offered = ALARM_MODES.filter((mode) => this._preview.cards[id]?.modes?.some((m) => m.mode === mode));
+    const missing = ALARM_MODES.filter((mode) => !offered.includes(mode)).map(alarmModeName);
     const alarmo = "arm_mode" in a && "open_sensors" in a;
-    const rows = has.map(([mode, name]) => {
+    const rows = offered.map((mode) => {
+      const name = alarmModeName(mode);
       const shown = !hidden.includes(mode);
       return `<div class="moderow ${shown ? "" : "off"}">
-        ${this._switch("alarmshow", shown, `Show ${name}`).replace("data-act=", `data-mode="${mode}" data-act=`)}
+        ${this._switch("alarmshow", shown, tr("alarm.show", { mode: name })).replace("data-act=", `data-mode="${mode}" data-act=`)}
         <span class="muted small tag">${esc(name)}</span>
-        <input id="alarmname-${mode}" type="text" maxlength="24" placeholder="${esc(name)}" aria-label="Name for ${esc(name)} on the Nest"
+        <input id="alarmname-${mode}" type="text" maxlength="24" placeholder="${esc(name)}" aria-label="${esc(tr("alarm.name_for", { mode: name }))}"
           value="${esc((settings.names || {})[mode] || "")}" data-input="alarmname" data-mode="${mode}"></div>`;
     }).join("");
-    const lengths = [["", "Any length: a ✓ after 0 sends it"], ...[4, 5, 6, 7, 8].map((n) => [String(n), `${n} digits: the last sends it`])];
+    const lengths = [["", tr("alarm.any_length")], ...[4, 5, 6, 7, 8].map((n) => [String(n), tr("alarm.digits", { count: n })])];
     return `<div class="group">
-        <div class="muted small">Modes on the ring</div>
-        <p class="muted small">After Back, in this order. A name shows on the ring and as “Armed · name” on the card; blank keeps Home Assistant's.</p>
-        ${rows || `<p class="muted small">This alarm has no modes to arm to.</p>`}
-        ${missing.length ? `<p class="muted small">${esc(missing.join(", "))}: not offered by this alarm.</p>` : ""}
-        ${alarmo ? `<div><button class="btn ghost" data-act="alarmcopy">Copy names from its Alarmo card</button></div>` : ""}
+        <div class="muted small">${esc(tr("alarm.modes"))}</div>
+        <p class="muted small">${esc(tr("alarm.modes_about"))}</p>
+        ${rows || `<p class="muted small">${esc(tr("alarm.no_modes"))}</p>`}
+        ${missing.length ? `<p class="muted small">${esc(tr("alarm.not_offered", { modes: missing.join(", ") }))}</p>` : ""}
+        ${alarmo ? `<div><button class="btn ghost" data-act="alarmcopy">${esc(tr("alarm.copy_alarmo"))}</button></div>` : ""}
       </div>
       <div class="group">
-        <div class="muted small">Code</div>
-        <div class="field"><label for="alarmlength">How long is the code?</label>
+        <div class="muted small">${esc(tr("ring.code"))}</div>
+        <div class="field"><label for="alarmlength">${esc(tr("alarm.length"))}</label>
           <select id="alarmlength" class="pick wide" data-input="alarmlength">${lengths.map(([v, l]) =>
             `<option value="${v}" ${String(settings.code_length || "") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
-        <p class="muted small">The Nest asks for a code whenever the alarm wants one, and it checks it; Fledge never keeps it. Three wrong codes lock the code pad for 30 s, longer each time.</p>
-        ${a.code_format === "text" ? `<div class="banner warn inline">This alarm's code has letters, which the ring can't enter: disarm it from Home Assistant.</div>` : ""}
+        <p class="muted small">${esc(tr("alarm.code_about"))}</p>
+        ${a.code_format === "text" ? `<div class="banner warn inline">${esc(tr("alarm.letters"))}</div>` : ""}
       </div>
-      <div class="kv"><span class="text"><span class="name">Take over the screen</span>
-          <span class="sub">When someone comes in (the entry delay) or it goes off, the Nest lights up on it; the code pad first, if it needs a code</span></span>
-        ${this._switch("alarmtakeover", settings.takeover !== false, "Take over the screen")}</div>
-      <div class="banner ${alarmo ? "ok" : "warn"} inline">${alarmo
-        ? "Alarmo: countdowns in seconds, the sensor that set it off, and “Arm anyway” with a door open."
-        : "This alarm doesn't say how long its delays are, so the ring shows time running without the seconds."}</div>`;
+      <div class="kv"><span class="text"><span class="name">${esc(tr("alarm.takeover"))}</span>
+          <span class="sub">${esc(tr("alarm.takeover_sub"))}</span></span>
+        ${this._switch("alarmtakeover", settings.takeover !== false, tr("alarm.takeover"))}</div>
+      <div class="banner ${alarmo ? "ok" : "warn"} inline">${esc(tr(alarmo ? "alarm.alarmo" : "alarm.no_delays"))}</div>`;
   }
 
   // An Alarmo card for this alarm on a dashboard: its buttons' labels and
@@ -1663,25 +1677,25 @@ class FledgePanel extends HTMLElement {
     }
     const states = found[0]?.states;
     if (!states) {
-      this._flash("No Alarmo card for this alarm on a dashboard.");
+      this._flash(tr("alarm.no_alarmo"));
       return;
     }
     const settings = (this._draft.alarms[id] ||= {});
     settings.names = { ...(settings.names || {}) };
     settings.hidden = [];
-    for (const [mode] of ALARM_MODES) {
+    for (const mode of ALARM_MODES) {
       const own = states[`armed_${mode}`];
       if (own?.button_label) settings.names[mode] = String(own.button_label).slice(0, 24);
       if (own?.hide) settings.hidden.push(mode);
     }
-    this._flash("Copied its Alarmo card's names.");
+    this._flash(tr("alarm.copied"));
     this._render();
   }
 
   // The thermostat's name in Home Assistant (its device's), blank for its own.
   _nameField(key) {
     const t = this._current;
-    return `<div class="field"><label for="${key}">Thermostat's name</label>
+    return `<div class="field"><label for="${key}">${esc(tr("card.thermostat_name"))}</label>
       <input id="${key}" type="text" maxlength="60" placeholder="${esc(t.default_name || "Nest Thermostat")}" value="${esc(this._draft.device_name)}" data-input="devicename"></div>`;
   }
 
@@ -1689,8 +1703,9 @@ class FledgePanel extends HTMLElement {
     return `<button class="switch ${on ? "on" : ""}" role="switch" aria-checked="${on}" aria-label="${esc(label)}" data-act="${act}"><span class="knob"></span></button>`;
   }
 
-  _presence(group, k, label, sub) {
+  _presence(group, k, key) {
     const on = this._draft[group] === k;
+    const [label, sub] = [tr(key), tr(`${key}_sub`)];
     return `<label class="opt ${on ? "on" : ""}">
       <input type="radio" name="${group}" value="${k}" ${on ? "checked" : ""} data-input="${group}">
       <span class="text"><span class="name">${esc(label)}</span><span class="sub">${esc(sub)}</span></span></label>`;
@@ -1707,26 +1722,26 @@ class FledgePanel extends HTMLElement {
     const option = (k, label, sub, extra = "") => `<label class="opt ${chosen === k ? "on" : ""}">
       <input type="radio" name="wake" value="${k}" ${chosen === k ? "checked" : ""} ${k === "card" && !entities.length ? "disabled" : ""} data-input="wake">
       <span class="text"><span class="name">${esc(label)}</span><span class="sub">${esc(sub)}</span>${extra}</span></label>`;
-    const chips = chosen === "card" ? `<span class="chips" role="radiogroup" aria-label="Which card">${entities.map((id) =>
+    const chips = chosen === "card" ? `<span class="chips" role="radiogroup" aria-label="${esc(tr("wake.which_card"))}">${entities.map((id) =>
       `<button class="chipbtn ${id === device ? "on" : ""}" role="radio" aria-checked="${id === device}" data-act="wakecard" data-id="${esc(id)}">${esc(this._name(id))}</button>`).join("")}</span>` : "";
     return `<div class="cols">
       <section class="card pad">
-        <h2>When the Nest wakes</h2>
-        <p class="muted small">You walk up, turn the ring or press it while the screen is dark.</p>
-        ${WAKES.map(([k, label, sub]) => option(k, label, sub)).join("")}
-        ${option("card", "One of your cards", entities.length ? "Opened, ready to turn" : "Add a card first", chips)}
+        <h2>${esc(tr("wake.title"))}</h2>
+        <p class="muted small">${esc(tr("wake.about"))}</p>
+        ${WAKES.map(([k, key]) => option(k, tr(key), tr(`${key}_sub`))).join("")}
+        ${option("card", tr("wake.card"), tr(entities.length ? "wake.card_sub" : "wake.card_none"), chips)}
       </section>
       <section class="card pad">
-        <h2>Someone across the room</h2>
-        <p class="muted small">Fledge keeps the Nest's Farsight on, so its motion sensor always reports at once. Stay dark keeps the screen fully dark.</p>
-        ${FARS.map(([k, label, sub]) => this._presence("far", k, label, sub)).join("")}
-        <h2>Someone comes up to it</h2>
-        <p class="muted small">Close enough to reach it, without touching it.</p>
-        ${NEARS.map(([k, label, sub]) => this._presence("near", k, label, sub)).join("")}
-        <div class="field narrowfield"><label for="cardidle">Screen stays on for (s)</label><input id="cardidle" type="number" min="5" max="600" value="${esc(d.card_idle)}" data-input="cardidle"></div>
-        <div class="kv"><span>Turning a light down past 1% turns it off<span class="sub">The ring holds at 1% for a moment first. A switch turns off to the left and on to the right.</span></span>${this._switch("dimoff", d.dim_off, "Turning a light down past 1% turns it off")}</div>
-        <p class="muted small">What the glance shows is chosen on the Glance tab.</p>
-        ${keep ? `<div class="kv"><span>Keep screen on<span class="sub">Applies straight away</span></span>${this._switch("keepon", keepOn, "Keep screen on")}</div>` : ""}
+        <h2>${esc(tr("far.title"))}</h2>
+        <p class="muted small">${esc(tr("far.about"))}</p>
+        ${FARS.map(([k, key]) => this._presence("far", k, key)).join("")}
+        <h2>${esc(tr("near.title"))}</h2>
+        <p class="muted small">${esc(tr("near.about"))}</p>
+        ${NEARS.map(([k, key]) => this._presence("near", k, key)).join("")}
+        <div class="field narrowfield"><label for="cardidle">${esc(tr("wake.card_idle"))}</label><input id="cardidle" type="number" min="5" max="600" value="${esc(d.card_idle)}" data-input="cardidle"></div>
+        <div class="kv"><span>${esc(tr("wake.dim_off"))}<span class="sub">${esc(tr("wake.dim_off_sub"))}</span></span>${this._switch("dimoff", d.dim_off, tr("wake.dim_off"))}</div>
+        <p class="muted small">${esc(tr("wake.glance_tab"))}</p>
+        ${keep ? `<div class="kv"><span>${esc(tr("wake.keep_on"))}<span class="sub">${esc(tr("wake.keep_on_sub"))}</span></span>${this._switch("keepon", keepOn, tr("wake.keep_on"))}</div>` : ""}
       </section>
     </div>`;
   }
@@ -1805,7 +1820,7 @@ class FledgePanel extends HTMLElement {
     const f = new Face(this._look === "fledge");
     const p = this._glanceShown();
     if (!p) {
-      FACES.missing(f, "Glance", this._current.loaded ? "Drawing…" : "Fledge isn't running");
+      FACES.missing(f, tr("face.glance"), tr(this._current.loaded ? "preview.drawing" : "preview.not_running"));
       return f.html();
     }
     // A line with nothing to say takes no place: those after it close up.
@@ -1819,14 +1834,14 @@ class FledgePanel extends HTMLElement {
     const g = this._draft.glance;
     const twelve = this._gpreview?.twelve ?? g.hours === "12";
     const lines = glanceLines(face ? face.lines || {} : night ? g.night.lines : g.lines, layout, night).map((l) => {
-      const [text, icon] = GLANCE_SAMPLES[l.source] || [""];
+      const [text, icon] = GLANCE_SAMPLES[l.source]?.() || [""];
       return { text: l.source === "time" ? glanceTime(845, twelve, g.ampm) : text, icon };
     }).filter((l) => l.text);
     const now = new Date();
     const at = Math.floor(Date.UTC(2026, 0, 1, now.getHours(), now.getMinutes()) / 1000);
     const sample = { layout, clock: { hours: twelve ? 12 : 24, ampm: g.ampm }, offset: 0, colour: face ? face.colour !== false : g.colour,
-      weather: { condition: "partlycloudy", temperature: 9 }, big: { label: "Electricity", value: "24.3", unit: "p/kWh" },
-      event: { title: "Dentist", start: at + 7200, all_day: false } };
+      weather: { condition: "partlycloudy", temperature: 9 }, big: { label: tr("sample.big_label"), value: "24.3", unit: tr("sample.big_unit") },
+      event: { title: tr("sample.event"), start: at + 7200, all_day: false } };
     glanceFace(f, sample, lines, { current: 20.5, action: "heating" }, at);
     return f.html();
   }
@@ -1836,9 +1851,13 @@ class FledgePanel extends HTMLElement {
     const n = this._draft.glance.night;
     const twelve = this._gpreview?.twelve ?? this._draft.glance.hours === "12";
     const clock = (hhmm) => glanceTime(Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)), twelve, true);
-    if (n.mode === "sun") return "from sunset to sunrise";
-    if (n.mode === "hours") return `from ${clock(n.from)} to ${clock(n.until)}`;
-    if (n.mode === "sensor") return n.entity ? `while ${this._hass.states[n.entity]?.attributes.friendly_name || n.entity} is ${n.state}` : "while a sensor says so";
+    if (n.mode === "sun") return tr("night.when_sun");
+    if (n.mode === "hours") return tr("night.when_hours", { from: clock(n.from), until: clock(n.until) });
+    if (n.mode === "sensor") {
+      if (!n.entity) return tr("night.when_any_sensor");
+      const name = this._hass.states[n.entity]?.attributes.friendly_name || n.entity;
+      return tr(n.state === "off" ? "night.when_sensor_off" : "night.when_sensor_on", { name });
+    }
     return "";
   }
 
@@ -1847,22 +1866,21 @@ class FledgePanel extends HTMLElement {
     const d = this._draft;
     const g = d.glance;
     if (line.source === "none") return "";
-    if (shown?.text && shown.instead) return `<p class="now"><span class="muted">Nothing to say now, so instead:</span> ${esc(shown.text)}</p>`;
-    if (shown?.text) return `<p class="now"><span class="muted">Now:</span> ${esc(shown.text)}</p>`;
+    if (shown?.text && shown.instead) return `<p class="now"><span class="muted">${esc(tr("hint.instead"))}</span> ${esc(shown.text)}</p>`;
+    if (shown?.text) return `<p class="now"><span class="muted">${esc(tr("hint.now"))}</span> ${esc(shown.text)}</p>`;
     const why = {
-      playing: line.entity ? "It isn't playing now, so the line is empty." : this._entities().some((id) => id.startsWith("media_player."))
-        ? "None of your cards' speakers is playing now, so the line is empty." : "Choose a speaker: none of your cards is one.",
-      weather: d.weather ? "The weather entity isn't reporting." : "Choose a weather entity below.",
-      forecast: d.weather ? "No forecast from this weather entity yet." : "Choose a weather entity below.",
-      rain: d.weather ? "No hourly forecast from this weather entity." : "Choose a weather entity below.",
-      calendar: g.calendars.length ? "Nothing coming up." : "Choose a calendar below.",
-      entity: !line.entity ? "Choose what it shows." : (line.when || "always") !== "always" ? "Not showing now: its state isn't the one asked for."
-        : "It isn't reporting now.",
-      template: (line.template || "").trim() ? "The template gives nothing now." : "Write a template.",
-      inside: "The thermostat isn't reporting its temperature.", heating: "The thermostat isn't reporting.",
-      people: "Home Assistant has no people.", sun: "Home Assistant has no sun entity.",
+      playing: line.entity ? "hint.not_playing" : this._entities().some((id) => id.startsWith("media_player."))
+        ? "hint.none_playing" : "hint.choose_speaker",
+      weather: d.weather ? "hint.weather_silent" : "hint.choose_weather",
+      forecast: d.weather ? "hint.no_forecast" : "hint.choose_weather",
+      rain: d.weather ? "hint.no_hourly" : "hint.choose_weather",
+      calendar: g.calendars.length ? "hint.nothing_coming" : "hint.choose_calendar",
+      entity: !line.entity ? "hint.choose_entity" : (line.when || "always") !== "always" ? "hint.not_now" : "hint.entity_silent",
+      template: (line.template || "").trim() ? "hint.template_empty" : "hint.write_template",
+      inside: "hint.no_temperature", heating: "hint.thermostat_silent",
+      people: "hint.no_people", sun: "hint.no_sun",
     }[line.source];
-    return shown && why ? `<p class="now muted">${esc(why)} The lines below move up.</p>` : "";
+    return shown && why ? `<p class="now muted">${esc(tr(why))} ${esc(tr("hint.move_up"))}</p>` : "";
   }
 
   _glanceTab() {
@@ -1877,31 +1895,31 @@ class FledgePanel extends HTMLElement {
     const faceIds = this._entities().filter(isFace);
     const seg = (act, on, label) => `<button class="seg ${on ? "on" : ""}" data-act="${act}" aria-pressed="${on}">${label}</button>`;
     const sw = (act, on, label) => this._switch(act, on, label);
-    const layoutName = (k) => GLANCE_LAYOUTS.find(([key]) => key === k)[1];
-    const layouts = GLANCE_LAYOUTS.map(([k, name, sub]) => `<button class="lay ${k === layout ? "on" : ""}" role="radio" aria-checked="${k === layout}" data-act="glayout" data-k="${k}">
-        <span class="thumb"><span class="screen">${this._glanceThumb(k, night)}</span></span><span class="name">${esc(name)}</span><span class="sub">${esc(sub)}</span></button>`).join("");
-    const names = ["First line", "Second line", "Third line"];
+    const layouts = GLANCE_LAYOUTS.map((k) => `<button class="lay ${k === layout ? "on" : ""}" role="radio" aria-checked="${k === layout}" data-act="glayout" data-k="${k}">
+        <span class="thumb"><span class="screen">${this._glanceThumb(k, night)}</span></span><span class="name">${esc(layoutName(k))}</span><span class="sub">${esc(tr(`layout.${k}_sub`))}</span></button>`).join("");
+    const names = [tr("glance.line_1"), tr("glance.line_2"), tr("glance.line_3")];
     const lines = glanceLines(chosen, layout, night);
     const slot = (l, i) => {
-      const options = `<option value="none" ${l.source === "none" ? "selected" : ""}>Nothing</option>` + GLANCE_SOURCES.map(([group, items]) =>
-        `<optgroup label="${esc(group)}">${items.map(([k, label]) => `<option value="${k}" ${k === l.source ? "selected" : ""}>${esc(label)}</option>`).join("")}</optgroup>`).join("");
+      const options = `<option value="none" ${l.source === "none" ? "selected" : ""}>${esc(tr("common.nothing"))}</option>` + GLANCE_SOURCES.map(([group, items]) =>
+        `<optgroup label="${esc(tr(`source.${group}`))}">${items.map((k) => `<option value="${k}" ${k === l.source ? "selected" : ""}>${esc(lineName(k))}</option>`).join("")}</optgroup>`).join("");
       let extra = "";
       if (l.source === "entity") {
         const when = l.when || "always";
         const valued = ["is", "is_not", "above", "below"].includes(when);
-        extra = `<div class="split">${this._entityField(`gline${i}`, GLANCE_ENTITIES, "Shows", l.entity)}
-          <div class="field narrowfield"><label for="glabel${i}">Called</label><input id="glabel${i}" type="text" maxlength="40" placeholder="Its name" value="${esc(l.label || "")}" data-input="glabel" data-i="${i}"></div></div>
-          <div class="split"><div class="field"><label for="gwhen${i}">Show it</label><select id="gwhen${i}" class="pick wide" data-input="gwhen" data-i="${i}">${GLANCE_WHENS.map(([k, label]) => `<option value="${k}" ${k === when ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></div>
-          ${valued ? `<div class="field narrowfield"><label for="gvalue${i}">${when === "above" || when === "below" ? "Number" : "State"}</label><input id="gvalue${i}" type="text" maxlength="40" placeholder="${when === "above" || when === "below" ? "30" : "open"}" value="${esc(l.value || "")}" data-input="gvalue" data-i="${i}"></div>` : ""}</div>`;
+        const numbered = when === "above" || when === "below";
+        extra = `<div class="split">${this._entityField(`gline${i}`, GLANCE_ENTITIES, tr("glance.shows"), l.entity)}
+          <div class="field narrowfield"><label for="glabel${i}">${esc(tr("glance.called"))}</label><input id="glabel${i}" type="text" maxlength="40" placeholder="${esc(tr("glance.its_name"))}" value="${esc(l.label || "")}" data-input="glabel" data-i="${i}"></div></div>
+          <div class="split"><div class="field"><label for="gwhen${i}">${esc(tr("glance.show_it"))}</label><select id="gwhen${i}" class="pick wide" data-input="gwhen" data-i="${i}">${GLANCE_WHENS.map((k) => `<option value="${k}" ${k === when ? "selected" : ""}>${esc(tr(`when.${k}`))}</option>`).join("")}</select></div>
+          ${valued ? `<div class="field narrowfield"><label for="gvalue${i}">${esc(tr(numbered ? "glance.number" : "glance.state"))}</label><input id="gvalue${i}" type="text" maxlength="40" placeholder="${numbered ? "30" : esc(tr("glance.state_example"))}" value="${esc(l.value || "")}" data-input="gvalue" data-i="${i}"></div>` : ""}</div>`;
       } else if (l.source === "playing") {
-        extra = this._entityField(`gline${i}`, "media_player", "Speaker (none: whichever of your cards' speakers is playing)", l.entity);
+        extra = this._entityField(`gline${i}`, "media_player", tr("glance.speaker"), l.entity);
       } else if (l.source === "template") {
-        extra = `<div class="field"><label for="gtpl${i}">Template</label><textarea id="gtpl${i}" rows="2" maxlength="255" data-input="gtemplate" data-i="${i}" placeholder="{{ states('sensor.bin_day') }}">${esc(l.template || "")}</textarea></div>`;
+        extra = `<div class="field"><label for="gtpl${i}">${esc(tr("glance.template"))}</label><textarea id="gtpl${i}" rows="2" maxlength="255" data-input="gtemplate" data-i="${i}" placeholder="{{ states('sensor.bin_day') }}">${esc(l.template || "")}</textarea></div>`;
       }
       if (GLANCE_CAN_BE_EMPTY.includes(l.source)) {
         const other = l.else || "none";
-        extra += `<div class="field"><label for="gelse${i}">With nothing to say, show</label><select id="gelse${i}" class="pick wide" data-input="gelse" data-i="${i}">${GLANCE_FALLBACKS.filter(([k]) => k !== l.source)
-          .map(([k, label]) => `<option value="${k}" ${k === other ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></div>`;
+        extra += `<div class="field"><label for="gelse${i}">${esc(tr("glance.instead"))}</label><select id="gelse${i}" class="pick wide" data-input="gelse" data-i="${i}">${GLANCE_FALLBACKS.filter((k) => k !== l.source)
+          .map((k) => `<option value="${k}" ${k === other ? "selected" : ""}>${esc(k === "none" ? tr("line.none_instead") : lineName(k))}</option>`).join("")}</select></div>`;
       }
       return `<div class="gslot"><div class="field"><label for="gsrc${i}">${names[i]}</label><select id="gsrc${i}" class="pick wide" data-input="gsource" data-i="${i}">${options}</select></div>${extra}${this._glanceHint(l, shown?.lines[i])}</div>`;
     };
@@ -1918,19 +1936,19 @@ class FledgePanel extends HTMLElement {
     const foreign = !language.toLowerCase().startsWith("en");
     const words = foreign ? dateWords(language) : null;
     const calendarFields = usesCalendar || g.calendars.length ? `${[...g.calendars, ""].slice(0, 6).map((id, i) =>
-      this._entityField(`gcal${i}`, "calendar", i === 0 ? "Calendar" : id ? "Calendar" : "Another calendar (optional)", id)).join("")}
-        <div class="kv flat"><span>Leave out all-day events<span class="sub">Birthdays, bin days and the like</span></span>${sw("gallday", g.skip_all_day, "Leave out all-day events")}</div>` : "";
-    const dateFields = usesDate ? `<div class="split"><div class="field"><label for="gdate">Date</label><select id="gdate" class="pick wide" data-input="gdate">
-          <option value="auto" ${g.date === "auto" ? "selected" : ""}>Automatic</option><option value="dmy" ${g.date === "dmy" ? "selected" : ""}>11 November</option>
-          <option value="mdy" ${g.date === "mdy" ? "selected" : ""}>November 11</option></select></div>
-        ${foreign ? `<div class="field"><label for="glang">Its words</label><select id="glang" class="pick wide" data-input="glang">
+      this._entityField(`gcal${i}`, "calendar", i === 0 || id ? tr("glance.calendar") : tr("glance.another_calendar"), id)).join("")}
+        <div class="kv flat"><span>${esc(tr("glance.skip_all_day"))}<span class="sub">${esc(tr("glance.skip_all_day_sub"))}</span></span>${sw("gallday", g.skip_all_day, tr("glance.skip_all_day"))}</div>` : "";
+    const dateFields = usesDate ? `<div class="split"><div class="field"><label for="gdate">${esc(tr("glance.date"))}</label><select id="gdate" class="pick wide" data-input="gdate">
+          <option value="auto" ${g.date === "auto" ? "selected" : ""}>${esc(tr("common.automatic"))}</option><option value="dmy" ${g.date === "dmy" ? "selected" : ""}>${esc(tr("glance.date_dmy"))}</option>
+          <option value="mdy" ${g.date === "mdy" ? "selected" : ""}>${esc(tr("glance.date_mdy"))}</option></select></div>
+        ${foreign ? `<div class="field"><label for="glang">${esc(tr("glance.words"))}</label><select id="glang" class="pick wide" data-input="glang">
           <option value="en" ${g.words ? "" : "selected"}>English</option>
-          <option value="${esc(language)}" ${g.words ? "selected" : ""} ${words ? "" : "disabled"}>${esc(languageName(language))}${words ? "" : " (not in the Nest's alphabet)"}</option></select></div>` : ""}</div>` : "";
+          <option value="${esc(language)}" ${g.words ? "selected" : ""} ${words ? "" : "disabled"}>${esc(languageName(language))}${words ? "" : ` ${esc(tr("glance.not_alphabet"))}`}</option></select></div>` : ""}</div>` : "";
     let extras = "";
     if (layout === "number") {
-      extras = `${this._entityField("gbig", "sensor,input_number,number,counter", "The number", target.big)}
-        ${target.big ? "" : `<p class="now muted">Choose a sensor with a number: a price, a power, a battery.</p>`}
-        <div class="field"><label for="gbiglabel">Called</label><input id="gbiglabel" type="text" maxlength="40" placeholder="Its name" value="${esc(target.big_label || "")}" data-input="gbiglabel"></div>`;
+      extras = `${this._entityField("gbig", "sensor,input_number,number,counter", tr("glance.the_number"), target.big)}
+        ${target.big ? "" : `<p class="now muted">${esc(tr("glance.choose_number"))}</p>`}
+        <div class="field"><label for="gbiglabel">${esc(tr("glance.called"))}</label><input id="gbiglabel" type="text" maxlength="40" placeholder="${esc(tr("glance.its_name"))}" value="${esc(target.big_label || "")}" data-input="gbiglabel"></div>`;
     } else if (layout === "battery") {
       const b = target.battery || {};
       const line = b.charging_line || {};
@@ -1938,87 +1956,87 @@ class FledgePanel extends HTMLElement {
         <input id="gbat-${key}" type="text" maxlength="60" placeholder="${esc(placeholder)}" value="${esc(value || "")}" data-input="gbat" data-key="${key}"></div>`;
       const percent = (key, label, value) => `<div class="field"><label for="gbat-${key}">${esc(label)}</label>
         <input id="gbat-${key}" type="number" min="0" max="100" value="${esc(value)}" data-input="gbat" data-key="${key}"></div>`;
-      extras = `${this._entityField("gbat_level", "sensor,input_number,number", "Level (a percentage)", b.level)}
-        ${b.level ? "" : `<p class="now muted">Choose anything with a battery percentage: a car, a home battery, a mower.</p>`}
-        <div class="split">${this._entityField("gbat_charging", "binary_sensor,switch,input_boolean,sensor", "Charging (optional)", b.charging)}
-          ${this._entityField("gbat_plugged", "binary_sensor,switch,input_boolean,sensor", "Plugged in (optional)", b.plugged)}</div>
-        <div class="split">${this._entityField("gbat_power", "sensor", "Power (optional)", b.power)}
-          ${this._entityField("gbat_limit", "number,input_number,sensor", "Charge limit (optional)", b.limit)}</div>
-        <div class="split">${percent("low", "Low below (%)", b.low ?? 20)}${percent("critical", "Very low below (%)", b.critical ?? 10)}</div>
-        <p class="muted small">The line under the number is worked out from these: Charging · 7.2 kW, Plugged in, or a discharge's power. Without a charging entity, power going in counts as charging. The white notch on the ring is the charge limit.</p>
-        ${text("label", "Called", "Its name", b.label)}
+      extras = `${this._entityField("gbat_level", "sensor,input_number,number", tr("battery.level"), b.level)}
+        ${b.level ? "" : `<p class="now muted">${esc(tr("battery.choose"))}</p>`}
+        <div class="split">${this._entityField("gbat_charging", "binary_sensor,switch,input_boolean,sensor", tr("battery.charging"), b.charging)}
+          ${this._entityField("gbat_plugged", "binary_sensor,switch,input_boolean,sensor", tr("battery.plugged"), b.plugged)}</div>
+        <div class="split">${this._entityField("gbat_power", "sensor", tr("battery.power"), b.power)}
+          ${this._entityField("gbat_limit", "number,input_number,sensor", tr("battery.limit"), b.limit)}</div>
+        <div class="split">${percent("low", tr("battery.low"), b.low ?? 20)}${percent("critical", tr("battery.critical"), b.critical ?? 10)}</div>
+        <p class="muted small">${esc(tr("battery.line_about"))}</p>
+        ${text("label", tr("glance.called"), tr("glance.its_name"), b.label)}
         <div class="split">${customElements.get("ha-icon-picker")
-          ? `<ha-icon-picker data-pick="gbat_icon" data-label="Icon" data-value="${esc(b.icon || "")}"></ha-icon-picker>`
-          : text("icon", "Icon", "mdi:car-electric", b.icon)}
-          <div class="field"><label for="gbat-image">Or an image</label>
+          ? `<ha-icon-picker data-pick="gbat_icon" data-label="${esc(tr("battery.icon"))}" data-value="${esc(b.icon || "")}"></ha-icon-picker>`
+          : text("icon", tr("battery.icon"), "mdi:car-electric", b.icon)}
+          <div class="field"><label for="gbat-image">${esc(tr("battery.image"))}</label>
             <input id="gbat-image" type="text" maxlength="300" placeholder="/local/car.png" value="${esc(b.image || "")}" data-input="gbat" data-key="image"></div></div>
-        <p class="muted small">An image takes the icon's place: a file in Home Assistant's www folder (/local/car.png), an image uploaded to Home Assistant (its /api/image/serve/… address), or a web address. Best wide, side on and see-through.</p>
-        <div class="split">${this._entityField("gbat_chargingline", GLANCE_ENTITIES, "While charging, the line shows (optional)", line.entity)}
-          ${text("charging_label", "Called", "Full by", line.label)}</div>
-        <p class="muted small">Otherwise it shows the line chosen below.</p>`;
+        <p class="muted small">${esc(tr("battery.image_about"))}</p>
+        <div class="split">${this._entityField("gbat_chargingline", GLANCE_ENTITIES, tr("battery.charging_line"), line.entity)}
+          ${text("charging_label", tr("glance.called"), tr("battery.full_by"), line.label)}</div>
+        <p class="muted small">${esc(tr("battery.otherwise"))}</p>`;
     } else if (layout === "temp") {
-      extras = `<div class="kv flat"><span>Colour the screen while heating or cooling<span class="sub">Orange or blue, as the Nest's own Farsight</span></span>${sw("gcolour", target.colour !== false, "Colour the screen while heating or cooling")}</div>`;
+      extras = `<div class="kv flat"><span>${esc(tr("glance.colour"))}<span class="sub">${esc(tr("glance.colour_sub"))}</span></span>${sw("gcolour", target.colour !== false, tr("glance.colour"))}</div>`;
     } else if (layout === "agenda" && !g.calendars.length) {
-      extras = `<p class="now muted">Choose a calendar below.</p>`;
+      extras = `<p class="now muted">${esc(tr("hint.choose_calendar"))}</p>`;
     } else if (layout === "weather" && !d.weather) {
-      extras = `<p class="now muted">Choose a weather entity below.</p>`;
+      extras = `<p class="now muted">${esc(tr("hint.choose_weather"))}</p>`;
     }
     const nightNow = this._gpreview?.night_now;
-    const when = face ? "" : night ? `<h2>When it's night</h2>
-        <div class="field"><label for="gnmode">Night is</label><select id="gnmode" class="pick wide" data-input="gnmode">${GLANCE_NIGHT.map(([k, label]) => `<option value="${k}" ${k === n.mode ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></div>
-        ${n.mode === "off" ? `<p class="now muted">The Nest shows the day's glance all the time. Choose when night is to use this one.</p>` : ""}
-        ${n.mode === "sun" ? `<div class="split"><div class="field"><label for="gafter">Minutes after sunset</label><input id="gafter" type="number" min="-180" max="180" value="${esc(n.after)}" data-input="gafter"></div>
-          <div class="field"><label for="gbefore">Minutes before sunrise</label><input id="gbefore" type="number" min="-180" max="180" value="${esc(n.before)}" data-input="gbefore"></div></div>` : ""}
-        ${n.mode === "hours" ? `<div class="split"><div class="field"><label for="gfrom">From</label><input id="gfrom" type="time" value="${esc(n.from)}" data-input="gfrom"></div>
-          <div class="field"><label for="guntil">Until</label><input id="guntil" type="time" value="${esc(n.until)}" data-input="guntil"></div></div>` : ""}
-        ${n.mode === "sensor" ? `${this._entityField("gnight", "binary_sensor,input_boolean,switch,schedule", "Sensor (a bedtime switch, say)", n.entity)}
-          <div class="field"><label for="gstate">Night while it's</label><select id="gstate" class="pick wide" data-input="gstate"><option value="on" ${n.state === "on" ? "selected" : ""}>On</option><option value="off" ${n.state === "off" ? "selected" : ""}>Off</option></select></div>
-          ${n.entity ? "" : `<p class="now muted">Choose the sensor: until then it's always day.</p>`}` : ""}
-        ${n.mode !== "off" ? `<div class="kv flat"><span>Dim and warm<span class="sub">Drawn darker and warmer, on top of the Nest's own brightness</span></span>${sw("gdim", n.dim, "Dim and warm")}</div>
-          ${n.dim ? `<div class="field"><label for="glevel">How bright it stays: <span id="glevelsaid">${esc(n.level)}</span>%</label><input id="glevel" type="range" min="20" max="100" step="5" value="${esc(n.level)}" data-input="glevel"></div>` : ""}
-          <p class="now muted">${nightNow ? "By these settings it's night now." : "By these settings it's day now."}${n.mode === "sensor" ? " If the sensor is unavailable, it's day." : ""}</p>` : ""}`
-      : `<p class="muted small nightline">${n.mode === "off" ? "At night: the same glance." : `At night: ${esc(layoutName(n.layout))}, ${esc(this._glanceNightWhen())}.`}
-          <button class="btn text" data-act="gnight">${n.mode === "off" ? "Set up a night glance" : "Edit"}</button></p>`;
-    const designing = faceIds.length ? `<div class="group"><span class="muted small">Designing</span>
-        <div class="chips" role="radiogroup" aria-label="Which face">
-          <button class="chipbtn ${face ? "" : "on"}" role="radio" aria-checked="${!face}" data-act="gface" data-id="">The glance</button>
-          ${faceIds.map((id) => `<button class="chipbtn ${this._gface === id ? "on" : ""}" role="radio" aria-checked="${this._gface === id}" data-act="gface" data-id="${esc(id)}">${esc(this._name(id))} card</button>`).join("")}
-          <button class="chipbtn plus" data-act="addface" data-stay="1">+ New face card</button>
-        </div></div>` : `<p class="muted small nightline">Want this as a card you can turn to?
-          <button class="btn text" data-act="addface" data-stay="1">New face card</button></p>`;
-    const cardNote = face ? `<div class="banner note inline"><span>A card's face is the same day and night, and never dimmed: someone is standing at it.</span>
-        <button class="btn text" data-act="facecard">Its card</button></div>` : "";
+    const when = face ? "" : night ? `<h2>${esc(tr("night.title"))}</h2>
+        <div class="field"><label for="gnmode">${esc(tr("night.is"))}</label><select id="gnmode" class="pick wide" data-input="gnmode">${GLANCE_NIGHT.map((k) => `<option value="${k}" ${k === n.mode ? "selected" : ""}>${esc(tr(`night.${k}`))}</option>`).join("")}</select></div>
+        ${n.mode === "off" ? `<p class="now muted">${esc(tr("night.off_about"))}</p>` : ""}
+        ${n.mode === "sun" ? `<div class="split"><div class="field"><label for="gafter">${esc(tr("night.after_sunset"))}</label><input id="gafter" type="number" min="-180" max="180" value="${esc(n.after)}" data-input="gafter"></div>
+          <div class="field"><label for="gbefore">${esc(tr("night.before_sunrise"))}</label><input id="gbefore" type="number" min="-180" max="180" value="${esc(n.before)}" data-input="gbefore"></div></div>` : ""}
+        ${n.mode === "hours" ? `<div class="split"><div class="field"><label for="gfrom">${esc(tr("night.from"))}</label><input id="gfrom" type="time" value="${esc(n.from)}" data-input="gfrom"></div>
+          <div class="field"><label for="guntil">${esc(tr("night.until"))}</label><input id="guntil" type="time" value="${esc(n.until)}" data-input="guntil"></div></div>` : ""}
+        ${n.mode === "sensor" ? `${this._entityField("gnight", "binary_sensor,input_boolean,switch,schedule", tr("night.sensor_field"), n.entity)}
+          <div class="field"><label for="gstate">${esc(tr("night.while"))}</label><select id="gstate" class="pick wide" data-input="gstate"><option value="on" ${n.state === "on" ? "selected" : ""}>${esc(tr("common.on"))}</option><option value="off" ${n.state === "off" ? "selected" : ""}>${esc(tr("common.off"))}</option></select></div>
+          ${n.entity ? "" : `<p class="now muted">${esc(tr("night.choose_sensor"))}</p>`}` : ""}
+        ${n.mode !== "off" ? `<div class="kv flat"><span>${esc(tr("night.dim"))}<span class="sub">${esc(tr("night.dim_sub"))}</span></span>${sw("gdim", n.dim, tr("night.dim"))}</div>
+          ${n.dim ? `<div class="field"><label for="glevel">${esc(tr("night.level"))} <span id="glevelsaid">${esc(n.level)}</span>%</label><input id="glevel" type="range" min="20" max="100" step="5" value="${esc(n.level)}" data-input="glevel"></div>` : ""}
+          <p class="now muted">${esc(tr(nightNow ? "night.is_night" : "night.is_day"))}${n.mode === "sensor" ? ` ${esc(tr("night.unavailable_day"))}` : ""}</p>` : ""}`
+      : `<p class="muted small nightline">${esc(n.mode === "off" ? tr("night.same") : tr("night.summary", { layout: layoutName(n.layout), when: this._glanceNightWhen() }))}
+          <button class="btn text" data-act="gnight">${esc(tr(n.mode === "off" ? "night.set_up" : "common.edit"))}</button></p>`;
+    const designing = faceIds.length ? `<div class="group"><span class="muted small">${esc(tr("glance.designing"))}</span>
+        <div class="chips" role="radiogroup" aria-label="${esc(tr("glance.which_face"))}">
+          <button class="chipbtn ${face ? "" : "on"}" role="radio" aria-checked="${!face}" data-act="gface" data-id="">${esc(tr("glance.the_glance"))}</button>
+          ${faceIds.map((id) => `<button class="chipbtn ${this._gface === id ? "on" : ""}" role="radio" aria-checked="${this._gface === id}" data-act="gface" data-id="${esc(id)}">${esc(tr("glance.face_card", { name: this._name(id) }))}</button>`).join("")}
+          <button class="chipbtn plus" data-act="addface" data-stay="1">+ ${esc(tr("glance.new_face"))}</button>
+        </div></div>` : `<p class="muted small nightline">${esc(tr("glance.want_card"))}
+          <button class="btn text" data-act="addface" data-stay="1">${esc(tr("glance.new_face"))}</button></p>`;
+    const cardNote = face ? `<div class="banner note inline"><span>${esc(tr("glance.face_note"))}</span>
+        <button class="btn text" data-act="facecard">${esc(tr("glance.its_card"))}</button></div>` : "";
     return `<div class="cols glance">
-      <section class="stage" aria-label="${face ? "The face as the Nest shows it" : "The glance as the Nest shows it"}">
-        <span class="muted caps">On the Nest${face ? ` · ${esc(this._name(this._gface))} card, opened` : night ? " · at night" : ""}</span>
+      <section class="stage" aria-label="${esc(tr(face ? "glance.face_aria" : "glance.aria"))}">
+        <span class="muted caps">${esc(tr("preview.on_nest"))}${face ? ` · ${esc(tr("glance.face_opened", { name: this._name(this._gface) }))}` : night ? ` · ${esc(tr("glance.at_night"))}` : ""}</span>
         <div class="bezel ${this._gview.far && !face ? "far" : ""}"><div class="screen ${night && n.dim ? "dim" : ""}" style="--lvl:${n.level / 100}">${this._glanceScreen()}</div></div>
-        ${face ? "" : `<div class="segs" role="group" aria-label="How far away">${seg("gnear", !this._gview.far, "Close up")}${seg("gfar", this._gview.far, "Across the room")}</div>`}
-        <button class="btn ghost" data-act="gtry" ${t.loaded ? "" : "disabled"}><ha-icon icon="mdi:eye-outline"></ha-icon>Try on the Nest</button>
-        <span class="muted small center">Shows this ${face ? "face" : "glance"} on the Nest for 20 seconds, without saving it.</span>
+        ${face ? "" : `<div class="segs" role="group" aria-label="${esc(tr("glance.how_far"))}">${seg("gnear", !this._gview.far, tr("glance.close_up"))}${seg("gfar", this._gview.far, tr("glance.across"))}</div>`}
+        <button class="btn ghost" data-act="gtry" ${t.loaded ? "" : "disabled"}><ha-icon icon="mdi:eye-outline"></ha-icon>${esc(tr("glance.try"))}</button>
+        <span class="muted small center">${esc(tr(face ? "glance.try_face" : "glance.try_glance"))}</span>
       </section>
       <section class="card pad">
         ${designing}
         ${cardNote}
-        ${unshown ? `<div class="banner warn inline">Nothing shows the glance yet. Choose it for someone across the room or close up. <button class="btn text" data-act="tab" data-tab="wake">Wake &amp; presence</button></div>` : ""}
-        ${old ? `<div class="banner warn inline">${face ? "The Nest's Fledge build is older than face cards: it leaves them out until it updates." : "The Nest's Fledge build is older than these layouts: it shows the clock as before until it updates."} <button class="btn text" data-act="tab" data-tab="thermostat">Thermostat</button></div>` : ""}
-        ${face ? "" : `<div class="segs wide" role="group" aria-label="Which glance">${seg("gday", !night, "Day glance")}${seg("gnight", night, "Night glance")}</div>`}
+        ${unshown ? `<div class="banner warn inline">${esc(tr("glance.unshown"))} <button class="btn text" data-act="tab" data-tab="wake">${esc(tr("tab.wake"))}</button></div>` : ""}
+        ${old ? `<div class="banner warn inline">${esc(tr(face ? "glance.outdated_faces" : "glance.outdated_layouts"))} <button class="btn text" data-act="tab" data-tab="thermostat">${esc(tr("tab.thermostat"))}</button></div>` : ""}
+        ${face ? "" : `<div class="segs wide" role="group" aria-label="${esc(tr("glance.which_glance"))}">${seg("gday", !night, tr("glance.day"))}${seg("gnight", night, tr("glance.night"))}</div>`}
         ${when}
-        <h2>Layout</h2>
-        <div class="lays" role="radiogroup" aria-label="Layout">${layouts}</div>
+        <h2>${esc(tr("glance.layout"))}</h2>
+        <div class="lays" role="radiogroup" aria-label="${esc(tr("glance.layout"))}">${layouts}</div>
         ${extras}
-        <div class="head2"><h2>Lines</h2>${chosen[layout] ? `<button class="btn text" data-act="greset">Reset</button>` : ""}</div>
-        <p class="muted small">${lines.length === 1 ? `${esc(layoutName(layout))} has room for one line.` : `${esc(layoutName(layout))} has room for ${lines.length} lines, top to bottom.`} A line with nothing to say takes no room: the ones below move up.</p>
+        <div class="head2"><h2>${esc(tr("glance.lines"))}</h2>${chosen[layout] ? `<button class="btn text" data-act="greset">${esc(tr("glance.reset"))}</button>` : ""}</div>
+        <p class="muted small">${esc(tn("glance.room", lines.length, { layout: layoutName(layout) }))} ${esc(tr("glance.room_note"))}</p>
         ${lines.map(slot).join("")}
-        <h2>${faceIds.length ? "For the glance and every face" : "For day and night"}</h2>
-        <div class="field"><label for="ghours">Time format</label><select id="ghours" class="pick wide" data-input="ghours">
-          <option value="auto" ${g.hours === "auto" ? "selected" : ""}>Automatic${this._gpreview ? ` (${this._gpreview.twelve ? "12" : "24"}-hour here)` : ""}</option>
-          <option value="12" ${g.hours === "12" ? "selected" : ""}>12-hour</option><option value="24" ${g.hours === "24" ? "selected" : ""}>24-hour</option></select></div>
-        ${(this._gpreview?.twelve ?? g.hours === "12") ? `<div class="kv flat"><span>Show AM / PM<span class="sub">Small, beside the time</span></span>${sw("gampm", g.ampm, "Show AM / PM")}</div>` : ""}
-        ${usesWeather || d.weather ? this._entityField("weather", "weather", "Weather (also the Nest's own weather screen)", d.weather) : ""}
+        <h2>${esc(tr(faceIds.length ? "glance.shared_faces" : "glance.shared"))}</h2>
+        <div class="field"><label for="ghours">${esc(tr("glance.hours"))}</label><select id="ghours" class="pick wide" data-input="ghours">
+          <option value="auto" ${g.hours === "auto" ? "selected" : ""}>${esc(tr("common.automatic"))}${this._gpreview ? ` ${esc(tr("glance.hours_here", { hours: this._gpreview.twelve ? 12 : 24 }))}` : ""}</option>
+          <option value="12" ${g.hours === "12" ? "selected" : ""}>${esc(tr("glance.hours_12"))}</option><option value="24" ${g.hours === "24" ? "selected" : ""}>${esc(tr("glance.hours_24"))}</option></select></div>
+        ${(this._gpreview?.twelve ?? g.hours === "12") ? `<div class="kv flat"><span>${esc(tr("glance.ampm"))}<span class="sub">${esc(tr("glance.ampm_sub"))}</span></span>${sw("gampm", g.ampm, tr("glance.ampm"))}</div>` : ""}
+        ${usesWeather || d.weather ? this._entityField("weather", "weather", tr("glance.weather"), d.weather) : ""}
         ${calendarFields}
         ${dateFields}
-        ${t.protocol === 11 ? `<p class="now muted">The Nest's Fledge build is a little older than this panel: the date's words and order and how dim the night is wait for its update.</p>` : ""}
-        <p class="muted small">Automations can change the day's layout with the Glance layout entity. Night glance says which one is up.</p>
+        ${t.protocol === 11 ? `<p class="now muted">${esc(tr("glance.outdated_date"))}</p>` : ""}
+        <p class="muted small">${esc(tr("glance.automations"))}</p>
       </section>
     </div>`;
   }
@@ -2036,8 +2054,8 @@ class FledgePanel extends HTMLElement {
       const result = await this._hass.callWS({ type: "fledge/glance_try", entry_id: t.entry_id, glance: this._glanceSent(),
         night: this._glanceEditing().night });
       this._flash(result.protocol != null && result.protocol < 11
-        ? "Sent, but the Nest's Fledge build is too old to show it. Update it on the Thermostat tab."
-        : "On the Nest for 20 seconds.");
+        ? tr("glance.tried_outdated")
+        : tr("glance.tried"));
     } catch (err) {
       this._error = err?.message || String(err);
       this._render();
@@ -2050,21 +2068,21 @@ class FledgePanel extends HTMLElement {
       n.camera ? `  camera: ${n.camera}` : null, `  timeout: ${n.timeout}`].filter((l) => l != null).join("\n");
     return `<div class="cols">
       <section class="card pad">
-        <h2>Try a notification</h2>
-        <p class="muted small">It shows on every Nest running Fledge. A press or a dismissal fires <code>fledge_notification</code>.</p>
-        <div class="field"><label for="ntitle">Title</label><input id="ntitle" type="text" value="${esc(n.title)}" data-input="note" data-key="title"></div>
-        <div class="field"><label for="nmsg">Message</label><input id="nmsg" type="text" value="${esc(n.message)}" data-input="note" data-key="message"></div>
+        <h2>${esc(tr("notify.title"))}</h2>
+        <p class="muted small">${trHtml("notify.about", { event: "<code>fledge_notification</code>" })}</p>
+        <div class="field"><label for="ntitle">${esc(tr("notify.field_title"))}</label><input id="ntitle" type="text" value="${esc(n.title)}" data-input="note" data-key="title"></div>
+        <div class="field"><label for="nmsg">${esc(tr("notify.message"))}</label><input id="nmsg" type="text" value="${esc(n.message)}" data-input="note" data-key="message"></div>
         <div class="split">
-          <div class="field">${this._entityField("camera", "camera", "Camera picture", n.camera)}</div>
-          <div class="field narrowfield"><label for="nto">Shows for (s)</label><input id="nto" type="number" min="3" max="3600" value="${esc(n.timeout)}" data-input="note" data-key="timeout"></div>
+          <div class="field">${this._entityField("camera", "camera", tr("notify.camera"), n.camera)}</div>
+          <div class="field narrowfield"><label for="nto">${esc(tr("notify.timeout"))}</label><input id="nto" type="number" min="3" max="3600" value="${esc(n.timeout)}" data-input="note" data-key="timeout"></div>
         </div>
-        <div class="actions"><button class="btn solid" data-act="send" ${n.message.trim() ? "" : "disabled"}>Send to the Nest</button>
-          <button class="btn ghost" data-act="copy">Copy as automation action</button></div>
+        <div class="actions"><button class="btn solid" data-act="send" ${n.message.trim() ? "" : "disabled"}>${esc(tr("notify.send"))}</button>
+          <button class="btn ghost" data-act="copy">${esc(tr("notify.copy"))}</button></div>
       </section>
       <section class="card pad">
-        <h2>In an automation</h2>
+        <h2>${esc(tr("notify.automation"))}</h2>
         <pre><code>${esc(yaml)}</code></pre>
-        <p class="muted small">Add <code>tag</code> to dismiss it later with <code>fledge.dismiss</code>.</p>
+        <p class="muted small">${trHtml("notify.tag", { tag: "<code>tag</code>", dismiss: "<code>fledge.dismiss</code>" })}</p>
       </section>
     </div>`;
   }
@@ -2073,29 +2091,30 @@ class FledgePanel extends HTMLElement {
     const t = this._current;
     const update = t.update && this._hass.states[t.update];
     const check = own(t, "button", "check_update");
-    const protocol = t.protocol == null ? "Not reported yet" : t.protocol >= t.needs ? `${t.protocol} · matches` : `${t.protocol} · needs ${t.needs}`;
+    const protocol = t.protocol == null ? tr("thermostat.not_reported") : tr(t.protocol >= t.needs ? "thermostat.protocol_ok" : "thermostat.protocol_needs",
+      { protocol: t.protocol, needs: t.needs });
     let updateRow = "";
     if (update) {
       const available = update.state === "on";
       const busy = update.attributes.in_progress;
-      updateRow = `<div class="kv"><span>Fledge update<span class="sub">${busy ? "Installing…" : available ? `${esc(update.attributes.latest_version)} available` : "Up to date"}</span></span>
-        <span class="actions">${check ? `<button class="btn ghost" data-act="check">Check for updates</button>` : ""}
-        ${available ? `<button class="btn solid" data-act="install" ${busy ? "disabled" : ""}>Install</button>` : `<button class="btn ghost" data-act="more" data-id="${esc(t.update)}">Details</button>`}</span></div>`;
+      updateRow = `<div class="kv"><span>${esc(tr("thermostat.update"))}<span class="sub">${esc(busy ? tr("thermostat.installing") : available ? tr("thermostat.available", { version: update.attributes.latest_version }) : tr("thermostat.up_to_date"))}</span></span>
+        <span class="actions">${check ? `<button class="btn ghost" data-act="check">${esc(tr("thermostat.check"))}</button>` : ""}
+        ${available ? `<button class="btn solid" data-act="install" ${busy ? "disabled" : ""}>${esc(tr("thermostat.install"))}</button>` : `<button class="btn ghost" data-act="more" data-id="${esc(t.update)}">${esc(tr("thermostat.details"))}</button>`}</span></div>`;
     }
     const device = t.device_id ? `/config/devices/device/${t.device_id}` : null;
     return `<div class="cols">
       <section class="card pad">
         <h2>${esc(this._thermostatName())}</h2>
         ${this._nameField("devname")}
-        <div class="kv"><span class="muted">Serial</span><span>${esc(t.serial)}</span></div>
-        <div class="kv"><span class="muted">Fledge on the Nest<span class="sub">nestlocal</span></span><span class="mono">${esc(this._build() || "–")}</span></div>
-        <div class="kv"><span class="muted">Nest software<span class="sub">nlclient</span></span><span>${esc(t.sw_version || "–")}</span></div>
-        <div class="kv"><span class="muted">Card protocol</span><span class="${t.protocol != null && t.protocol < t.needs ? "badtext" : ""}">${esc(protocol)}</span></div>
-        <div class="kv"><span class="muted">Integration</span><span>${esc(t.version || "–")}</span></div>
+        <div class="kv"><span class="muted">${esc(tr("thermostat.serial"))}</span><span>${esc(t.serial)}</span></div>
+        <div class="kv"><span class="muted">${esc(tr("thermostat.fledge"))}<span class="sub">nestlocal</span></span><span class="mono">${esc(this._build() || "–")}</span></div>
+        <div class="kv"><span class="muted">${esc(tr("thermostat.nest_software"))}<span class="sub">nlclient</span></span><span>${esc(t.sw_version || "–")}</span></div>
+        <div class="kv"><span class="muted">${esc(tr("thermostat.protocol"))}</span><span class="${t.protocol != null && t.protocol < t.needs ? "badtext" : ""}">${esc(protocol)}</span></div>
+        <div class="kv"><span class="muted">${esc(tr("thermostat.integration"))}</span><span>${esc(t.version || "–")}</span></div>
         ${updateRow}
         <div class="actions">
-          ${device ? `<a class="btn ghost" href="${device}" data-act="nav" data-href="${device}">Heating, hot water and sensors</a>` : ""}
-          <a class="btn ghost" href="/config/integrations/integration/fledge" data-act="nav" data-href="/config/integrations/integration/fledge">Integration</a>
+          ${device ? `<a class="btn ghost" href="${device}" data-act="nav" data-href="${device}">${esc(tr("thermostat.device"))}</a>` : ""}
+          <a class="btn ghost" href="/config/integrations/integration/fledge" data-act="nav" data-href="/config/integrations/integration/fledge">${esc(tr("thermostat.integration"))}</a>
         </div>
       </section>
       ${this._role()}
@@ -2110,13 +2129,13 @@ class FledgePanel extends HTMLElement {
     const id = t.role_switch;
     const acting = this._acting();
     const body = !id
-      ? `<p class="muted small">Update Fledge on the Nest to use it only as a panel, without its thermostat.</p>`
+      ? `<p class="muted small">${esc(tr("role.outdated"))}</p>`
       : acting
-        ? `<p class="muted small">Using something else for your heating? Turn this off to keep the Nest as a panel for your cards. Its heating ${this._hotWater() ? "and hot water switch" : "switches"} off, and it stops being a thermostat in Home Assistant.</p>`
-        : `<div class="banner warn inline"><span><b>Not a thermostat.</b> Its heating is off (its hot water too, if it has it), and Home Assistant has only its sensors. Turn this back on to heat again as before.</span></div>`;
+        ? `<p class="muted small">${esc(tr(this._hotWater() ? "role.about_water" : "role.about"))}</p>`
+        : `<div class="banner warn inline"><span><b>${esc(tr("role.not"))}</b> ${esc(tr("role.not_about"))}</span></div>`;
     return `<section class="card pad">
-        <h2>Thermostat</h2>
-        ${id ? `<div class="kv"><span>Act as a thermostat<span class="sub">${acting ? "On: it controls your heating" : "Off: heating off, panel only"}</span></span>${this._switch("role", acting, "Act as a thermostat")}</div>` : ""}
+        <h2>${esc(tr("tab.thermostat"))}</h2>
+        ${id ? `<div class="kv"><span>${esc(tr("role.act"))}<span class="sub">${esc(tr(acting ? "role.act_on" : "role.act_off"))}</span></span>${this._switch("role", acting, tr("role.act"))}</div>` : ""}
         ${body}
         ${this._wwn()}
       </section>`;
@@ -2128,8 +2147,8 @@ class FledgePanel extends HTMLElement {
     const id = this._current.wwn_switch;
     if (!id) return "";
     const on = this._hass.states[id]?.state === "on";
-    return `<div class="kv"><span>Works With Nest boiler<span class="sub">${on ? "On: heats through its own W1 wire, no Heat Link" : "Off: heats through its Heat Link"}</span></span>${this._switch("wwn", on, "Works With Nest boiler")}</div>
-      <p class="muted small">For a Nest with no Heat Link, or a boiler wired straight to the Nest's own base. Without it, a Nest that can't find its Heat Link can stop with error H71 or H74. Changing it reboots the Nest.</p>`;
+    return `<div class="kv"><span>${esc(tr("wwn.title"))}<span class="sub">${esc(tr(on ? "wwn.on" : "wwn.off"))}</span></span>${this._switch("wwn", on, tr("wwn.title"))}</div>
+      <p class="muted small">${esc(tr("wwn.about"))}</p>`;
   }
 
   _hotWater() {
@@ -2140,25 +2159,17 @@ class FledgePanel extends HTMLElement {
   _roleDialog() {
     const off = this._acting();
     const water = this._hotWater();
-    const name = esc(this._thermostatName());
-    const items = off ? [
-      `Its heating${water ? " and hot water turn" : " turns"} <b>off</b> now, and nothing can turn ${water ? "them" : "it"} back on while it's off. Its safety temperatures still protect against frost.`,
-      "Home Assistant loses its thermostat: the climate entity, schedules, Eco, Auto-Schedule, Home/Away and the other heating controls. Automations and dashboards that use them stop working.",
-      "Its card and heating settings go from the Nest's screen. Your other cards stay.",
-      "Its temperature and humidity sensors stay, with its motion, light and power sensors.",
-    ] : [
-      "Its heating goes back to the mode it was in (its hot water schedule too, if it had one), and it heats again if that calls for it.",
-      "Home Assistant gets its thermostat and heating controls back, with the same entity IDs.",
-      "Its card and heating settings come back on the Nest's screen.",
-    ];
+    // Each item's words, its <b>…</b> kept bold.
+    const items = (off ? [water ? "role.off_heating_water" : "role.off_heating", "role.off_ha", "role.off_card", "role.off_sensors"]
+      : ["role.on_heating", "role.on_ha", "role.on_card"]).map((key) => esc(tr(key)).replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/g, "<b>$1</b>"));
     return `<div class="scrim" data-act="closerole"></div>
       <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="roletitle">
-        <div class="head"><h2 id="roletitle">${off ? `Stop ${name} acting as a thermostat?` : `Make ${name} a thermostat again?`}</h2>
-          <button class="icon" data-act="closerole" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button></div>
+        <div class="head"><h2 id="roletitle">${esc(tr(off ? "role.ask_off" : "role.ask_on", { name: this._thermostatName() }))}</h2>
+          <button class="icon" data-act="closerole" aria-label="${esc(tr("common.close"))}"><ha-icon icon="mdi:close"></ha-icon></button></div>
         <ul class="role">${items.map((i) => `<li>${i}</li>`).join("")}</ul>
         <div class="actions"><span class="grow"></span>
-          <button class="btn text" data-act="closerole">Cancel</button>
-          <button class="btn solid ${off ? "danger" : ""}" data-act="roleconfirm">${off ? "Turn heating off" : "Turn heating back on"}</button></div>
+          <button class="btn text" data-act="closerole">${esc(tr("common.cancel"))}</button>
+          <button class="btn solid ${off ? "danger" : ""}" data-act="roleconfirm">${esc(tr(off ? "role.confirm_off" : "role.confirm_on"))}</button></div>
       </div>`;
   }
 
@@ -2170,24 +2181,23 @@ class FledgePanel extends HTMLElement {
     const option = this._current.room_sensor_switch;
     const optionOn = option && this._hass.states[option]?.state === "on";
     return `<section class="card pad">
-        <h2>Weather and temperature</h2>
-        <p class="muted small">The Nest's own weather screen and the glance show this weather.</p>
-        ${this._entityField("weather", "weather", "Weather", d.weather)}
-        ${this._entityField("outdoor_temperature", "sensor", "Outside thermometer (optional)", d.outdoor_temperature, false, "temperature")}
-        <h2>Room thermometer</h2>
-        <p class="muted small">The Nest regulates from this sensor instead of its own, and goes back to its own if the readings stop.
-        ${can ? "" : " It needs the Nest's external temperature option, which turns off its Bluetooth: real Nest Temperature Sensors stop working."}</p>
-        ${option ? `<div class="kv"><span>External temperature option<span class="sub">${optionOn === can ? "Reboots the Nest when changed" : "Rebooting the Nest into it…"}</span></span>${this._switch("extoption", optionOn, "External temperature option")}</div>` : ""}
-        ${this._entityField("room_sensor", "sensor", "Room thermometer (optional)", d.room_sensor, false, "temperature")}
-        ${d.room_sensor && !can ? `<p class="badtext small">This Nest runs without the external temperature option, so it ignores the readings for now.${option ? "" : " Update its Fledge to turn the option on from here."}</p>` : ""}
+        <h2>${esc(tr("temps.title"))}</h2>
+        <p class="muted small">${esc(tr("temps.about"))}</p>
+        ${this._entityField("weather", "weather", tr("temps.weather"), d.weather)}
+        ${this._entityField("outdoor_temperature", "sensor", tr("temps.outside"), d.outdoor_temperature, false, "temperature")}
+        <h2>${esc(tr("temps.room"))}</h2>
+        <p class="muted small">${esc(tr("temps.room_about"))}${can ? "" : ` ${esc(tr("temps.room_option"))}`}</p>
+        ${option ? `<div class="kv"><span>${esc(tr("temps.option"))}<span class="sub">${esc(tr(optionOn === can ? "temps.option_reboots" : "temps.option_rebooting"))}</span></span>${this._switch("extoption", optionOn, tr("temps.option"))}</div>` : ""}
+        ${this._entityField("room_sensor", "sensor", tr("temps.room_field"), d.room_sensor, false, "temperature")}
+        ${d.room_sensor && !can ? `<p class="badtext small">${esc(tr("temps.ignored"))}${option ? "" : ` ${esc(tr("temps.ignored_update"))}`}</p>` : ""}
       </section>`;
   }
 
   _saveBar() {
     if (!this._dirty && !this._busy) return "";
-    return `<div class="savebar" role="region" aria-label="Unsaved changes"><span>Unsaved changes</span><span class="grow"></span>
-      <button class="btn text" data-act="revert" ${this._busy ? "disabled" : ""}>Revert</button>
-      <button class="btn solid" data-act="save" ${this._busy ? "disabled" : ""}>${this._busy ? "Saving…" : "Save"}</button></div>`;
+    return `<div class="savebar" role="region" aria-label="${esc(tr("save.unsaved"))}"><span>${esc(tr("save.unsaved"))}</span><span class="grow"></span>
+      <button class="btn text" data-act="revert" ${this._busy ? "disabled" : ""}>${esc(tr("save.revert"))}</button>
+      <button class="btn solid" data-act="save" ${this._busy ? "disabled" : ""}>${esc(tr(this._busy ? "save.saving" : "save.save"))}</button></div>`;
   }
 
   _candidates() {
@@ -2208,11 +2218,11 @@ class FledgePanel extends HTMLElement {
     const q = this._query.trim().toLowerCase();
     if (q && !["glance", "face", "clock", "time", "weather", "calendar", "look"].some((w) => w.startsWith(q) || q.startsWith(w))) return "";
     const g = this._draft.glance;
-    return `<div class="muted caps grouphead">Something to look at</div>
+    return `<div class="muted caps grouphead">${esc(tr("add.look"))}</div>
       <button class="pickrow faceoffer" data-act="addface">
         <span class="thumb"><span class="screen">${this._glanceThumb(g.layout, false)}</span></span>
-        <span class="text"><span class="name">A glance face</span>
-          <span class="sub wrap">The time, the weather, what's next or any sensor, as a card you can turn to. Starts as a copy of your glance.</span></span>
+        <span class="text"><span class="name">${esc(tr("add.face"))}</span>
+          <span class="sub wrap">${esc(tr("add.face_sub"))}</span></span>
         <ha-icon icon="mdi:plus"></ha-icon></button>`;
   }
 
@@ -2232,14 +2242,14 @@ class FledgePanel extends HTMLElement {
     const list = this._candidates();
     return `<div class="scrim" data-act="closeadd"></div>
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="addtitle">
-        <div class="head"><h2 id="addtitle">Add a card</h2><button class="icon" data-act="closeadd" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button></div>
-        <label class="hidden" for="search">Search</label>
-        <input id="search" type="search" placeholder="Lights, speakers, cameras, scenes…" value="${esc(this._query)}" data-input="search" autocomplete="off">
-        <div class="results">${this._faceOffer()}${list.length ? `<div class="muted caps grouphead">Something to control</div>` : ""}${list.length ? list.map((c) => `<button class="pickrow" data-act="addone" data-id="${esc(c.id)}">
+        <div class="head"><h2 id="addtitle">${esc(tr("cards.add"))}</h2><button class="icon" data-act="closeadd" aria-label="${esc(tr("common.close"))}"><ha-icon icon="mdi:close"></ha-icon></button></div>
+        <label class="hidden" for="search">${esc(tr("add.search"))}</label>
+        <input id="search" type="search" placeholder="${esc(tr("add.search_placeholder"))}" value="${esc(this._query)}" data-input="search" autocomplete="off">
+        <div class="results">${this._faceOffer()}${list.length ? `<div class="muted caps grouphead">${esc(tr("add.control"))}</div>` : ""}${list.length ? list.map((c) => `<button class="pickrow" data-act="addone" data-id="${esc(c.id)}">
             <span class="ico"><ha-icon icon="${esc(c.icon)}"></ha-icon></span>
             <span class="text"><span class="name">${esc(c.name)}</span><span class="sub">${esc(c.id)}</span></span>
-            <span class="muted small">${esc(KINDS[domainOf(c.id)] || "")}</span></button>`).join("")
-          : `<p class="muted center">Nothing else can be a card.</p>`}</div>
+            <span class="muted small">${esc(KINDS[domainOf(c.id)] ? kindName(domainOf(c.id)) : "")}</span></button>`).join("")
+          : `<p class="muted center">${esc(tr("add.nothing"))}</p>`}</div>
       </div>`;
   }
 
@@ -2398,7 +2408,7 @@ class FledgePanel extends HTMLElement {
         const off = this._acting();
         this._roleAsk = false;
         this._hass.callService("switch", off ? "turn_off" : "turn_on", { entity_id: this._current.role_switch })
-          .then(() => this._flash(off ? "The Nest's heating is off: it's a panel now." : "The Nest is a thermostat again."),
+          .then(() => this._flash(tr(off ? "role.done_off" : "role.done_on")),
             (err) => { this._error = err?.message || String(err); this._render(); });
         break;
       }
@@ -2408,7 +2418,7 @@ class FledgePanel extends HTMLElement {
         const hidden = new Set(settings.hidden || []);
         if (hidden.has(el.dataset.mode)) hidden.delete(el.dataset.mode);
         else hidden.add(el.dataset.mode);
-        settings.hidden = ALARM_MODES.map(([m]) => m).filter((m) => hidden.has(m));
+        settings.hidden = ALARM_MODES.filter((m) => hidden.has(m));
         break;
       }
       case "alarmcopy": this._copyAlarmo(d.order[this._sel]); return;
@@ -2421,32 +2431,26 @@ class FledgePanel extends HTMLElement {
       case "wwn": {
         const id = this._current.wwn_switch;
         const on = this._hass.states[id]?.state === "on";
-        const ask = on
-          ? "Turn Works With Nest boiler off?\n\nThe Nest goes back to heating through its Heat Link. If it has no Heat Link it may stop with error H71 or H74.\n\nThe Nest reboots now, and its heating pauses for about a minute."
-          : "Turn Works With Nest boiler on?\n\nThe Nest stops using its Heat Link and switches the boiler itself, through the W1 wire on its own base. Only do this if the Nest has no Heat Link, or the boiler is wired to the Nest's base: a boiler wired to a Heat Link won't come on.\n\nThe Nest reboots now, and its heating pauses for about a minute.";
-        if (!confirm(ask)) return;
+        if (!confirm(tr(on ? "wwn.ask_off" : "wwn.ask_on"))) return;
         this._hass.callService("switch", on ? "turn_off" : "turn_on", { entity_id: id })
-          .then(() => this._flash("The Nest is rebooting into it."), (err) => { this._error = err?.message || String(err); this._render(); });
+          .then(() => this._flash(tr("common.rebooting")), (err) => { this._error = err?.message || String(err); this._render(); });
         return;
       }
       case "extoption": {
         const id = this._current.room_sensor_switch;
         const on = this._hass.states[id]?.state === "on";
-        const ask = on
-          ? "Turn the external temperature option off? The Nest reboots (its heating pauses for about a minute) and goes back to its own sensor and Bluetooth."
-          : "Turn the external temperature option on? The Nest reboots (its heating pauses for about a minute) and its Bluetooth turns off, so real Nest Temperature Sensors stop working.";
-        if (!confirm(ask)) return;
+        if (!confirm(tr(on ? "temps.ask_off" : "temps.ask_on"))) return;
         this._hass.callService("switch", on ? "turn_off" : "turn_on", { entity_id: id })
-          .then(() => this._flash("The Nest is rebooting into it."), (err) => { this._error = err?.message || String(err); this._render(); });
+          .then(() => this._flash(tr("common.rebooting")), (err) => { this._error = err?.message || String(err); this._render(); });
         return;
       }
       case "install": this._hass.callService("update", "install", { entity_id: this._current.update }); return;
       case "check":
         this._hass.callService("button", "press", { entity_id: own(this._current, "button", "check_update") })
-          .then(() => this._flash("Asked the Nest to look for an update."), (err) => { this._error = err?.message || String(err); this._render(); });
+          .then(() => this._flash(tr("thermostat.checking")), (err) => { this._error = err?.message || String(err); this._render(); });
         return;
       case "send": this._send(); return;
-      case "copy": navigator.clipboard?.writeText(this.shadowRoot.querySelector("pre code")?.textContent || ""); this._flash("Copied."); return;
+      case "copy": navigator.clipboard?.writeText(this.shadowRoot.querySelector("pre code")?.textContent || ""); this._flash(tr("notify.copied")); return;
       default: return;
     }
     this._render();
@@ -2513,7 +2517,7 @@ class FledgePanel extends HTMLElement {
     } else if (what === "pick" && e.type === "change") {
       this._choose(el.dataset.key, el.value);
     } else if (what === "which" && e.type === "change") {
-      if (this._dirty && !confirm("Leave this thermostat's unsaved changes?")) {
+      if (this._dirty && !confirm(tr("save.leave"))) {
         el.value = String(this._index);
         return;
       }
@@ -2752,7 +2756,7 @@ class FledgePanel extends HTMLElement {
     if (n.camera) data.camera = n.camera;
     try {
       await this._hass.callService("fledge", "notify", data);
-      this._flash("Sent.");
+      this._flash(tr("notify.sent"));
     } catch (err) {
       this._error = err?.message || String(err);
       this._render();

@@ -1,0 +1,249 @@
+{
+  "config": {
+    "flow_title": "Nest {serial}",
+    "step": {
+      "user": {
+        "title": "Fledge",
+        "description": "Kies de Nest-thermostaat waarop Fledge draait. Die moet eerst via MQTT met Home Assistant verbonden zijn. Nieuw met Fledge? Lees [de documentatie]({docs}).",
+        "data": {
+          "serial": "Thermostaat"
+        }
+      },
+      "confirm": {
+        "title": "Fledge",
+        "description": "Er is een Nest-thermostaat met Fledge gevonden (serienummer {serial}). Home Assistant op het scherm zetten?"
+      },
+      "cards": {
+        "title": "Wat de thermostaat toont",
+        "description": "Elk apparaat is een kaart op de thermostaat, in deze volgorde (sleep om de volgorde te wijzigen). Draai aan de ring om erdoor te bladeren, druk om er een te openen: een lamp dimt, een schakelaar schakelt, een thermostaat stelt zijn temperatuur in, een speaker zijn volume. Na de installatie orden je ze in het Fledge-paneel in de zijbalk. [Hoe de kaarten werken]({docs}cards.html).",
+        "data": {
+          "entities": "Apparaten",
+          "wake": "Als de thermostaat ontwaakt",
+          "wake_device": "Of open dit apparaat",
+          "weather": "Weer",
+          "far": "Iemand aan de andere kant van de kamer",
+          "near": "Iemand komt dichtbij",
+          "card_idle": "Scherm blijft aan gedurende",
+          "dim_off": "Een lamp verder dimmen dan 1% zet hem uit",
+          "outdoor_temperature": "Buitenthermometer",
+          "room_sensor": "Kamerthermometer",
+          "show_thermostat": "Toon de eigen kaart van de thermostaat"
+        },
+        "data_description": {
+          "entities": "Lampen (een lampgroep werkt voor een hele kamer), schakelaars, ventilatoren, andere thermostaten, speakers, zonwering, camera's, alarmen, scènes en scripts. Namen, grenzen, de oogopslag en de weergaven stel je daarna in in het Fledge-paneel in de zijbalk.",
+          "wake": "Wat er verschijnt als je naar de thermostaat toe loopt, aan de ring draait of erop drukt terwijl het scherm donker is.",
+          "wake_device": "Ontwaak in plaats daarvan direct in een van de apparaten hierboven.",
+          "weather": "Een weerentiteit: het eigen weer van de Nest (buitentemperatuur, luchtvochtigheid en verwachting) en de oogopslag.",
+          "far": "Als de Nest iemand aan de andere kant van de kamer ziet. Fledge laat Farsight van de Nest aan, zodat de bewegingssensor altijd direct meldt; Niets houdt het scherm helemaal donker.",
+          "near": "Als iemand dichtbij komt, zonder hem aan te raken.",
+          "card_idle": "Hoe lang het scherm aan blijft op wat je opende (de kaarten, of een apparaat daarop) als niets wordt aangeraakt en niemand dichtbij is. Daarna gaat het naar de oogopslag (als er nog iemand in de buurt is) of op donker, en de volgende keer ontwaken begint weer bovenaan.",
+          "dim_off": "Draai de ring van een lamp helemaal naar links om hem uit te zetten: hij blijft even op 1% staan, zodat snel draaien hem alleen dimt. Een lamp die alleen schakelt gaat uit naar links en aan naar rechts.",
+          "outdoor_temperature": "Optioneel: de buitentemperatuur van deze sensor in plaats van de weerentiteit.",
+          "room_sensor": "Optioneel: de Nest regelt op deze sensor in plaats van zijn eigen. De Nest heeft daarvoor de optie voor externe temperatuur van Fledge nodig, die zijn Bluetooth uitzet (echte Nest-temperatuursensoren werken dan niet meer). Als de metingen stoppen, gaat de Nest terug naar zijn eigen sensor.",
+          "show_thermostat": "Uit regelt de Nest nog steeds je verwarming, maar toont het scherm alleen de apparaten hierboven: stel de temperatuur in vanuit Home Assistant. Wil je dat hij helemaal geen thermostaat meer is, zet dan zijn schakelaar Act as a thermostat uit."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Deze thermostaat is al ingesteld.",
+      "no_thermostats": "Er is geen Nest met Fledge gevonden. Verbind hem eerst via MQTT met Home Assistant.",
+      "not_fledge": "Dit is geen thermostaat waarop Fledge draait."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wat de thermostaat toont",
+        "description": "Elk apparaat is een kaart op de thermostaat, in deze volgorde (sleep om de volgorde te wijzigen). Draai aan de ring om erdoor te bladeren, druk om er een te openen: een lamp dimt, een schakelaar schakelt, een thermostaat stelt zijn temperatuur in, een speaker zijn volume. [Hoe de kaarten werken]({docs}cards.html).",
+        "data": {
+          "entities": "Apparaten",
+          "wake": "Als de thermostaat ontwaakt",
+          "wake_device": "Of open dit apparaat",
+          "weather": "Weer",
+          "far": "Iemand aan de andere kant van de kamer",
+          "near": "Iemand komt dichtbij",
+          "card_idle": "Scherm blijft aan gedurende",
+          "dim_off": "Een lamp verder dimmen dan 1% zet hem uit",
+          "outdoor_temperature": "Buitenthermometer",
+          "room_sensor": "Kamerthermometer",
+          "show_thermostat": "Toon de eigen kaart van de thermostaat"
+        },
+        "data_description": {
+          "entities": "Lampen (een lampgroep werkt voor een hele kamer), schakelaars, ventilatoren, andere thermostaten, speakers, zonwering, camera's, alarmen, scènes en scripts. Namen, grenzen, de oogopslag en de weergaven stel je daarna in in het Fledge-paneel in de zijbalk.",
+          "wake": "Wat er verschijnt als je naar de thermostaat toe loopt, aan de ring draait of erop drukt terwijl het scherm donker is.",
+          "wake_device": "Ontwaak in plaats daarvan direct in een van de apparaten hierboven.",
+          "weather": "Een weerentiteit: het eigen weer van de Nest (buitentemperatuur, luchtvochtigheid en verwachting) en de oogopslag.",
+          "far": "Als de Nest iemand aan de andere kant van de kamer ziet. Fledge laat Farsight van de Nest aan, zodat de bewegingssensor altijd direct meldt; Niets houdt het scherm helemaal donker.",
+          "near": "Als iemand dichtbij komt, zonder hem aan te raken.",
+          "card_idle": "Hoe lang het scherm aan blijft op wat je opende (de kaarten, of een apparaat daarop) als niets wordt aangeraakt en niemand dichtbij is. Daarna gaat het naar de oogopslag (als er nog iemand in de buurt is) of op donker, en de volgende keer ontwaken begint weer bovenaan.",
+          "dim_off": "Draai de ring van een lamp helemaal naar links om hem uit te zetten: hij blijft even op 1% staan, zodat snel draaien hem alleen dimt. Een lamp die alleen schakelt gaat uit naar links en aan naar rechts.",
+          "outdoor_temperature": "Optioneel: de buitentemperatuur van deze sensor in plaats van de weerentiteit.",
+          "room_sensor": "Optioneel: de Nest regelt op deze sensor in plaats van zijn eigen. De Nest heeft daarvoor de optie voor externe temperatuur van Fledge nodig, die zijn Bluetooth uitzet (echte Nest-temperatuursensoren werken dan niet meer). Als de metingen stoppen, gaat de Nest terug naar zijn eigen sensor.",
+          "show_thermostat": "Uit regelt de Nest nog steeds je verwarming, maar toont het scherm alleen de apparaten hierboven: stel de temperatuur in vanuit Home Assistant. Wil je dat hij helemaal geen thermostaat meer is, zet dan zijn schakelaar Act as a thermostat uit."
+        }
+      }
+    }
+  },
+  "selector": {
+    "wake": {
+      "options": {
+        "chooser": "De apparaatkiezer: de thermostaat tussen je apparaten, uitgezoomd",
+        "auto": "Automatisch: de speaker die speelt, anders na zonsondergang een lamp die aan is, anders de apparaatkiezer",
+        "thermostat": "De thermostaat, zoals de Nest altijd deed"
+      }
+    },
+    "far": {
+      "options": {
+        "glance": "De oogopslag: de tijd, het weer en wat er aan staat",
+        "wake": "Waarin hij ontwaakt",
+        "dark": "Niets: het scherm blijft donker"
+      }
+    },
+    "near": {
+      "options": {
+        "wake": "Waarin hij ontwaakt, zonder aanraking",
+        "glance": "De oogopslag",
+        "none": "Niets meer dan aan de andere kant van de kamer"
+      }
+    }
+  },
+  "issues": {
+    "thermostat_outdated": {
+      "title": "Werk Fledge op de thermostaat bij",
+      "description": "Op de Nest-thermostaat {serial} draait een Fledge-versie die ouder is dan deze integratie nodig heeft, dus sommige kaarten werken mogelijk niet. Installeer de update via de update-entiteit van de thermostaat (Instellingen → Updates)."
+    },
+    "room_sensor_unsupported": {
+      "title": "De Nest kan de kamerthermometer nog niet gebruiken",
+      "description": "De Nest-thermostaat {serial} is ingesteld om te regelen op {sensor}, maar draait zonder de optie voor externe temperatuur van Fledge, dus negeert hij de metingen. Werk Fledge op de Nest bij om de optie vanuit Home Assistant aan te zetten, of maak Kamerthermometer leeg in de opties van de integratie."
+    },
+    "room_sensor_switch": {
+      "title": "Zet de optie voor externe temperatuur van de Nest aan",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Externe temperatuur aanzetten",
+            "description": "De Nest-thermostaat {serial} gaat regelen op je kamerthermometer. Het aanzetten van de optie herstart de Nest (de verwarming pauzeert ongeveer een minuut) en zet zijn Bluetooth uit, zodat echte Nest-temperatuursensoren niet meer werken. Als de metingen stoppen, gaat de Nest terug naar zijn eigen sensor. Je kunt het weer uitzetten met de schakelaar External temperature van de Nest."
+          }
+        },
+        "abort": {
+          "no_switch": "De Nest biedt de schakelaar niet meer aan: werk Fledge op de Nest bij."
+        }
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "wake_to": {
+        "name": "Ontwaken in"
+      },
+      "across_the_room": {
+        "name": "Aan de andere kant van de kamer"
+      },
+      "close_up": {
+        "name": "Dichtbij"
+      },
+      "glance_layout": {
+        "name": "Indeling oogopslag"
+      }
+    },
+    "switch": {
+      "keep_screen_on": {
+        "name": "Scherm aan houden"
+      }
+    },
+    "button": {
+      "wake_screen": {
+        "name": "Scherm wekken"
+      }
+    },
+    "sensor": {
+      "heating_today": {
+        "name": "Verwarming vandaag"
+      },
+      "hot_water_today": {
+        "name": "Warm water vandaag"
+      }
+    },
+    "binary_sensor": {
+      "night_glance": {
+        "name": "Oogopslag 's nachts"
+      }
+    }
+  },
+  "services": {
+    "notify": {
+      "name": "Melding op de thermostaat",
+      "description": "Toont een melding op het scherm van de Nest, wekt het scherm en laat een geluid horen. Drukken beantwoordt de melding en lang drukken (of het verlopen van de tijd) sluit hem; beide sturen een fledge_notification-event met de tag. Geeft de tag terug.",
+      "fields": {
+        "message": {
+          "name": "Bericht",
+          "description": "Wat erin staat."
+        },
+        "title": {
+          "name": "Titel",
+          "description": "Een kop boven het bericht, of over het beeld van de camera."
+        },
+        "icon": {
+          "name": "Pictogram",
+          "description": "Getoond boven de titel als er geen afbeelding is."
+        },
+        "camera": {
+          "name": "Camera",
+          "description": "Toont een nu genomen beeld van deze camera, schermvullend: die van een deurbel bijvoorbeeld."
+        },
+        "timeout": {
+          "name": "Time-out",
+          "description": "Hoe lang de melding blijft staan voordat hij zichzelf sluit."
+        },
+        "tag": {
+          "name": "Tag",
+          "description": "Benoemt de melding, voor fledge.dismiss en in het event. Wordt verzonnen als je hem weglaat."
+        },
+        "thermostat": {
+          "name": "Thermostaat",
+          "description": "Welke Nests hem tonen; allemaal als er geen gekozen is."
+        }
+      }
+    },
+    "dismiss": {
+      "name": "Sluiten op de thermostaat",
+      "description": "Haalt een melding van het scherm van de Nest.",
+      "fields": {
+        "tag": {
+          "name": "Tag",
+          "description": "De tag waarmee hij werd getoond."
+        },
+        "thermostat": {
+          "name": "Thermostaat",
+          "description": "Van welke Nests hij gesloten wordt; allemaal als er geen gekozen is."
+        }
+      }
+    },
+    "set_schedule": {
+      "name": "Het schema van de Nest instellen",
+      "description": "Vervangt de genoemde dagen van het eigen weekschema van een Nest, verwarming of warm water of beide, in één keer; de andere dagen blijven zoals ze zijn. Een lege lijst laat een dag zonder wijzigingen. Het verwarmingsschema schrijven zet Automatisch schema uit en stelt de temperatuur in die nu geldt, tenzij de Nest op Eco staat.",
+      "fields": {
+        "entity_id": {
+          "name": "Thermostaat",
+          "description": "De thermostaat van de Nest, of een andere eigen entiteit ervan."
+        },
+        "heating": {
+          "name": "Verwarming",
+          "description": "Te vervangen dagen (mon tot en met sun), elk een lijst wijzigingen met een time (HH:MM) en een temp in °C. Zie de README voor een voorbeeld."
+        },
+        "hot_water": {
+          "name": "Warm water",
+          "description": "Te vervangen dagen (mon tot en met sun), elk een lijst aan-periodes met een on- en een off-tijd (HH:MM). Zie de README voor een voorbeeld."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "not_a_nest": {
+      "message": "{entity_id} hoort niet bij een Nest-thermostaat waarop Fledge draait."
+    },
+    "no_hot_water": {
+      "message": "De Nest {serial} heeft geen warmwaterschema."
+    }
+  }
+}
