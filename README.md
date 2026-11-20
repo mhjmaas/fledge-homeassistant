@@ -259,6 +259,10 @@ actions:
 
 `rooms` (a list of names) is optional and shows on the Nest ("Heating for Office"). The integration renews the ask every minute. While it asks, the switch is the only say: a temperature or mode set on the Nest or its climate entity is put back. If Home Assistant stops, the Nest goes back to its own schedule by itself after ten minutes. See [Home Assistant calls for heat](https://sysmoon14.github.io/fledge/docs/thermostat.html#call-for-heat).
 
+## Let Home Assistant call for hot water
+
+On a Nest with hot water control, the **Call for hot water** switch keeps the hot water on for as long as it's on, and off when it's off. There are no 30, 60 and 120 minute boosts to chain, and no gap while one is renewed. It works through the Nest's own boost, renewed every minute while the switch is on; if Home Assistant stops, the boost runs out within ten minutes. The Nest's own hot water schedule carries on as before (turn off **Hot water schedule** if Home Assistant should decide alone). Needs thermostat v0.12.0 or later. See [Home Assistant calls for hot water](https://sysmoon14.github.io/fledge/docs/thermostat.html#call-for-hot-water).
+
 ## Weather and temperature
 
 The weather entity you pick (in the panel's **Thermostat** tab, or the

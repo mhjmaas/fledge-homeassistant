@@ -152,6 +152,9 @@
       },
       "call_for_heat": {
         "name": "Call for heat"
+      },
+      "call_for_hot_water": {
+        "name": "Call for hot water"
       }
     },
     "button": {

@@ -160,5 +160,7 @@ ART_TOPIC = "{prefix}/{serial}/set/art/{entity}"
 # again every ASK_EVERY while the Call for heat switch is used.
 STATE_TOPIC = "{prefix}/{serial}/state"
 CALL_FOR_HEAT_TOPIC = "{prefix}/{serial}/set/call_for_heat"
+# Call for hot water (nestlocal's hotwater.rs): the same lease, renewed as often.
+CALL_FOR_HOT_WATER_TOPIC = "{prefix}/{serial}/set/call_for_hot_water"
 ASK_LEASE = 600
 ASK_EVERY = 60

@@ -620,7 +620,7 @@ async def test_the_panel_lays_out_the_cards_and_saves_them(hass: HomeAssistant, 
     shown = found[0]
     assert (shown["entry_id"], shown["serial"], shown["climate"], shown["loaded"]) == \
         (entry.entry_id, SERIAL, "climate.nest_thermostat", True)
-    assert set(shown["entities"]) == {"keep_screen_on", "call_for_heat", "wake_to", "wake_screen", "across_the_room", "close_up",
+    assert set(shown["entities"]) == {"keep_screen_on", "call_for_heat", "call_for_hot_water", "wake_to", "wake_screen", "across_the_room", "close_up",
                                       "glance_layout", "night_glance"}
 
     await client.send_json_auto_id({"type": "fledge/preview", "entities": ["light.lamp", "light.gone"],
@@ -1439,3 +1439,45 @@ async def test_call_for_heat_asks_while_heating_control_is_home_assistant_s(hass
 
     await hass.services.async_call("switch", "turn_off", {"entity_id": switch}, blocking=True)
     assert asks()[-1] == {"heat": False, "lease": 600, "rooms": []}
+
+
+async def test_call_for_hot_water_keeps_asking_while_on_and_says_off_once(hass: HomeAssistant, mqtt_mock,
+                                                                          freezer) -> None:
+    from datetime import timedelta
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=SERIAL, data={"serial": SERIAL},
+                            options={"entities": [], "wake": "chooser"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    [switch] = [e for e in hass.states.async_entity_ids("switch") if e.endswith("call_for_hot_water")]
+    topic = f"nestlocal/{SERIAL}/set/call_for_hot_water"
+    asks = lambda: [json.loads(c.args[1]) for c in mqtt_mock.async_publish.call_args_list if c.args[0] == topic]
+
+    async def tick():
+        freezer.tick(timedelta(seconds=61))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+
+    assert hass.states.get(switch).state == "unavailable", "not heard from the thermostat yet"
+    async_fire_mqtt_message(hass, f"nestlocal/{SERIAL}/state", json.dumps({"has_hot_water_control": True}))
+    await hass.async_block_till_done()
+    assert hass.states.get(switch).state == "unavailable", "an older thermostat that doesn't take the call"
+    async_fire_mqtt_message(hass, f"nestlocal/{SERIAL}/state", json.dumps({"has_hot_water_control": True,
+                                                                             "hot_water_boost_end": None}))
+    await hass.async_block_till_done()
+    assert hass.states.get(switch).state == "off"
+    await tick()
+    assert asks() == [], "off: nothing sent, a boost from the Nest is left alone"
+
+    await hass.services.async_call("switch", "turn_on", {"entity_id": switch}, blocking=True)
+    assert asks() == [{"on": True, "lease": 600}]
+    await tick()
+    assert asks()[-1] == {"on": True, "lease": 600} and len(asks()) == 2, "renewed every minute"
+
+    await hass.services.async_call("switch", "turn_off", {"entity_id": switch}, blocking=True)
+    assert asks()[-1] == {"on": False, "lease": 600}
+    n = len(asks())
+    await tick()
+    assert len(asks()) == n, "off is said once"
