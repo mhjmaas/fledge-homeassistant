@@ -896,7 +896,7 @@ async def test_the_nest_shows_the_time_in_home_assistant_s_time_zone(hass: HomeA
 
     await hass.config.async_update(location_name="Home")
     await hass.async_block_till_done()
-    assert len(sent()) == 1, "unchanged: not sent again (a new zone reboots the Nest)"
+    assert len(sent()) == 1, "unchanged: not sent again"
     await hass.config.async_update(time_zone="Europe/London")
     await hass.async_block_till_done()
     assert sent()[-1] == ("Europe/London", True)

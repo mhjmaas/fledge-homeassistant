@@ -6,7 +6,7 @@ and external temperature blueprints.
 nestlocal takes °C (commands.rs): outdoor_temperature and outdoor_humidity
 as numbers, weather as Home Assistant's forecasts in JSON, and
 external_temperature as a number while it runs with -external-temperature;
-time_zone as an IANA name (time_zone.rs).
+time_zone as an IANA name (weather.rs).
 """
 
 from __future__ import annotations
@@ -200,7 +200,7 @@ class Feeds:
         self.hass.async_create_task(self.async_send_time_zone())
 
     async def async_send_time_zone(self) -> None:
-        """Home Assistant's own; the Nest reboots only when it changes."""
+        """Home Assistant's own, sent again only when it changes."""
         if self.hass.config.time_zone:
             await self._publish(self._topic(TIME_ZONE_TOPIC), self.hass.config.time_zone, retain=True)
 
