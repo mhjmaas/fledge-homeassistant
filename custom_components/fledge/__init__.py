@@ -567,16 +567,26 @@ class Thermostat:
         """A media player's album art, shrunk for the thermostat, or none."""
         png: bytes | None = None
         player = self.hass.data[MEDIA_PLAYERS].get_entity(entity) if picture and MEDIA_PLAYERS in self.hass.data else None
+        if picture and player is None:
+            _LOGGER.debug("No album art from %s: no media player entity to ask", entity)
         if player is not None:
+            content_type = None
             try:
-                data, _ = await player.async_get_media_image()
+                data, content_type = await player.async_get_media_image()
             except Exception:  # noqa: BLE001 - a player failing to fetch its art: none shown
                 _LOGGER.debug("No album art from %s", entity, exc_info=True)
                 data = None
             if data:
                 png = await self.hass.async_add_executor_job(art.thumbnail, data)
+                if png is None:
+                    _LOGGER.debug("No album art from %s: %d bytes of %s that aren't a picture Pillow reads",
+                                  entity, len(data), content_type)
+            else:
+                _LOGGER.debug("No album art from %s: the player gave no picture for %s", entity, picture)
         if self.art.get(entity) != picture:
             return  # the track changed again meanwhile
+        if png:
+            _LOGGER.debug("Album art for %s: %d bytes sent to the thermostat", entity, len(png))
         topic = ART_TOPIC.format(prefix=TOPIC_PREFIX, serial=self.serial, entity=entity)
         await mqtt.async_publish(self.hass, topic, png or b"", retain=True)
 

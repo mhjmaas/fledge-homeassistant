@@ -4,6 +4,11 @@ Call for heat: while the thermostat's heating control is Home Assistant's,
 on asks it to fire the boiler and off asks it not to. The ask is sent again
 every minute; if Home Assistant stops, the thermostat goes back to its own
 schedule by itself.
+
+Call for hot water: on keeps the thermostat's hot water on, through its own
+boost, for as long as the switch is on; off turns it off. The ask is sent
+again every minute while on; if Home Assistant stops, the boost runs out
+within ASK_LEASE seconds.
 """
 
 from __future__ import annotations
@@ -22,13 +27,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import (ASK_EVERY, ASK_LEASE, CALL_FOR_HEAT_TOPIC, CONF_SERIAL, SCREEN_ON_TOPIC, STATE_TOPIC,
+from .const import (ASK_EVERY, ASK_LEASE, CALL_FOR_HEAT_TOPIC, CALL_FOR_HOT_WATER_TOPIC, CONF_SERIAL, SCREEN_ON_TOPIC, STATE_TOPIC,
                     TOPIC_PREFIX)
 from .entity import FledgeEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, add: AddEntitiesCallback) -> None:
-    add([KeepScreenOn(entry), CallForHeat(entry)])
+    add([KeepScreenOn(entry), CallForHeat(entry), CallForHotWater(entry)])
     entity_platform.async_get_current_platform().async_register_entity_service(
         "call_for_heat",
         {vol.Required("heat"): cv.boolean, vol.Optional("rooms", default=[]): vol.All(cv.ensure_list, [cv.string])},
@@ -126,3 +131,70 @@ class CallForHeat(FledgeEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.async_call_for_heat(False)
+
+
+class CallForHotWater(FledgeEntity, SwitchEntity, RestoreEntity):
+    """Available on a thermostat with hot water control that takes the call
+    (its state says when its boost ends)."""
+
+    _attr_icon = "mdi:water-boiler"
+    _attr_is_on = False
+
+    def __init__(self, entry) -> None:
+        super().__init__(entry, "call_for_hot_water")
+        serial = entry.data[CONF_SERIAL]
+        self.topic = CALL_FOR_HOT_WATER_TOPIC.format(prefix=TOPIC_PREFIX, serial=serial)
+        self.state_topic = STATE_TOPIC.format(prefix=TOPIC_PREFIX, serial=serial)
+        self.supported = False
+        self.boost_end: str | None = None
+
+    @property
+    def available(self) -> bool:
+        return self.supported
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"boost_ends": self.boost_end}
+
+    async def async_added_to_hass(self) -> None:
+        last = await self.async_get_last_state()
+        self._attr_is_on = last is not None and last.state == "on"
+        self.async_on_remove(await mqtt.async_subscribe(self.hass, self.state_topic, self._state))
+        self.async_on_remove(async_track_time_interval(self.hass, self._renew, timedelta(seconds=ASK_EVERY)))
+
+    @callback
+    def _state(self, msg) -> None:
+        try:
+            state = json.loads(msg.payload)
+        except (ValueError, TypeError):
+            return
+        was = self.supported
+        # Only a thermostat that takes the call says when its boost ends.
+        self.supported = bool(state.get("has_hot_water_control")) and "hot_water_boost_end" in state
+        self.boost_end = state.get("hot_water_boost_end")
+        self.async_write_ha_state()
+        if self.supported and not was and self._attr_is_on:
+            # Back (a restart of either): asked again at once.
+            self.hass.async_create_task(self._ask())
+
+    async def _renew(self, _now=None) -> None:
+        # Only while on: off was said once, and a boost started on the Nest
+        # afterwards is left to run.
+        if self._attr_is_on:
+            await self._ask()
+
+    async def _ask(self) -> None:
+        if not self.supported:
+            return
+        await mqtt.async_publish(self.hass, self.topic, json.dumps({"on": self._attr_is_on, "lease": ASK_LEASE}))
+
+    async def _set(self, on: bool) -> None:
+        self._attr_is_on = on
+        self.async_write_ha_state()
+        await self._ask()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._set(False)
